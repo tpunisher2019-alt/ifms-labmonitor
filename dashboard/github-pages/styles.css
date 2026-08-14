@@ -5,4 +5,5 @@
 .panel>header{gap:16px}
 .panel-subtitle{display:block;margin-top:5px}
 .request-actions{display:flex;gap:8px;flex-wrap:wrap}
+#request-rows small{display:block;color:var(--muted);margin-top:4px}
 @media(max-width:700px){.request-actions{width:100%}.panel>header{align-items:flex-start;flex-direction:column}}
