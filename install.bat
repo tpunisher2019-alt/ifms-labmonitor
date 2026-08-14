@@ -6,6 +6,5 @@ if not "%errorlevel%"=="0" (
   powershell.exe -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
   exit /b
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -Force %*
 if errorlevel 1 pause
-
