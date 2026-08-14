@@ -41,7 +41,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $InstallPath 'config\policy.json')))
     Copy-Item -LiteralPath (Join-Path $sourceRoot 'config\policy.json') -Destination (Join-Path $InstallPath 'config\policy.json') -Force
 }
 if (-not (Test-Path -LiteralPath (Join-Path $InstallPath 'config\network.json'))) {
-    Copy-Item -LiteralPath (Join-Path $sourceRoot 'config\network.example.json') -Destination (Join-Path $InstallPath 'config\network.json') -Force
+    $packagedNetworkConfig = Join-Path $sourceRoot 'config\network.json'
+    $networkConfigSource = if (Test-Path -LiteralPath $packagedNetworkConfig) {
+        $packagedNetworkConfig
+    } else {
+        Join-Path $sourceRoot 'config\network.example.json'
+    }
+    Copy-Item -LiteralPath $networkConfigSource -Destination (Join-Path $InstallPath 'config\network.json') -Force
 }
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'uninstall.ps1') -Destination (Join-Path $InstallPath 'uninstall.ps1') -Force
 
