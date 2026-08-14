@@ -92,8 +92,11 @@ create table if not exists public.device_jobs (
 create index if not exists device_jobs_device_status_idx on public.device_jobs(device_id, status);
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('agent-releases', 'agent-releases', false, 52428800, array['application/zip'])
-on conflict (id) do update set public = false;
+values ('agent-releases', 'agent-releases', false, 52428800, array['application/zip', 'application/x-zip-compressed'])
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
 
 alter table public.enrollment_tokens enable row level security;
 alter table public.devices enable row level security;
@@ -109,4 +112,3 @@ alter table public.device_jobs enable row level security;
 -- Exemplo para gerar um token de matrícula de uso único:
 -- insert into public.enrollment_tokens(token_hash, label, expires_at)
 -- values (encode(digest('COLE-UM-TOKEN-ALEATORIO-AQUI', 'sha256'), 'hex'), 'Laboratório 01', now() + interval '7 days');
-
