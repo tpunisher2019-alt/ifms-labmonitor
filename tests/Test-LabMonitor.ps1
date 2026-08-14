@@ -40,6 +40,8 @@ try{
     $registration=Get-LmDeviceRegistrationInfo
     Assert-True ($registration.installationId -match '^[a-f0-9]{64}$') 'Identificador da instalação inválido.'
     Assert-True ($registration.machineUuidHash -match '^[a-f0-9]{64}$') 'Hash do identificador físico inválido.'
+    Assert-True ($registration.hardwareFingerprint -match '^[a-f0-9]{64}$') 'Impressão digital do hardware inválida.'
+    Assert-True ($registration.installationId -eq $registration.hardwareFingerprint) 'A identidade estável não pode depender do nome do Windows.'
     Assert-True ((New-LmRandomSecret) -match '^[a-f0-9]{64}$') 'Segredo local de autorização inválido.'
 
     Write-Host '4/6 Coletando inventário real do Windows...'

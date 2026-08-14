@@ -23,14 +23,26 @@ function New-LmRandomSecret {
 function Get-LmDeviceRegistrationInfo {
     $computer = Get-CimInstance Win32_ComputerSystemProduct -ErrorAction SilentlyContinue
     $operatingSystem = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+    $bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue
+    $baseBoard = Get-CimInstance Win32_BaseBoard -ErrorAction SilentlyContinue
     $adapters = @(Get-CimInstance Win32_NetworkAdapterConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPEnabled })
     $macs = @($adapters | ForEach-Object { [string]$_.MACAddress } | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
     $ips = @($adapters | ForEach-Object { @($_.IPAddress) } | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notmatch '^(127\.|169\.254\.)' } | Sort-Object -Unique)
-    $machineUuid = if ($computer.UUID) { [string]$computer.UUID } else { $env:COMPUTERNAME }
+    $machineUuid = if ($null -ne $computer -and $computer.UUID) { [string]$computer.UUID } else { $env:COMPUTERNAME }
+    $biosSerial = if ($null -ne $bios) { [string]$bios.SerialNumber } else { '' }
+    $baseBoardSerial = if ($null -ne $baseBoard) { [string]$baseBoard.SerialNumber } else { '' }
+    $hardwareParts = @()
+    if ($machineUuid -and $machineUuid -notmatch '^(0{8}-0{4}-0{4}-0{4}-0{12}|F{8}-F{4}-F{4}-F{4}-F{12})$') { $hardwareParts += 'uuid:' + $machineUuid.ToUpperInvariant() }
+    if ($biosSerial -and $biosSerial -notmatch '^(Default string|To Be Filled By O\.E\.M\.|None)$') { $hardwareParts += 'bios:' + $biosSerial.Trim().ToUpperInvariant() }
+    if ($baseBoardSerial -and $baseBoardSerial -notmatch '^(Default string|To Be Filled By O\.E\.M\.|None)$') { $hardwareParts += 'board:' + $baseBoardSerial.Trim().ToUpperInvariant() }
+    if (-not $hardwareParts.Count) { $hardwareParts += @($macs | ForEach-Object { 'mac:' + $_ }) }
+    if (-not $hardwareParts.Count) { $hardwareParts += 'host:' + $env:COMPUTERNAME.ToUpperInvariant() }
+    $hardwareFingerprint = Get-LmSha256Text -Text ($hardwareParts -join '|')
     return [ordered]@{
-        installationId = Get-LmSha256Text -Text ('{0}|{1}' -f $env:COMPUTERNAME, $machineUuid)
+        installationId = $hardwareFingerprint
         hostname = $env:COMPUTERNAME
         machineUuidHash = Get-LmSha256Text -Text $machineUuid
+        hardwareFingerprint = $hardwareFingerprint
         macAddresses = $macs
         localIpAddresses = $ips
         osType = 'Windows'
@@ -66,7 +78,7 @@ function Initialize-LmDeviceIdentity {
     $registration = Get-LmDeviceRegistrationInfo
     $requestPath = Get-LmEnrollmentRequestPath $RootPath
     $pending = Read-LmJsonFile -Path $requestPath
-    if ($null -eq $pending -or -not $pending.registrationSecret) {
+    if ($null -eq $pending -or -not $pending.registrationSecret -or $pending.installationId -ne $registration.installationId) {
         $pending = [ordered]@{
             schemaVersion = 1
             installationId = $registration.installationId
@@ -81,6 +93,7 @@ function Initialize-LmDeviceIdentity {
         installationId = $registration.installationId
         hostname = $registration.hostname
         machineUuidHash = $registration.machineUuidHash
+        hardwareFingerprint = $registration.hardwareFingerprint
         macAddresses = $registration.macAddresses
         localIpAddresses = $registration.localIpAddresses
         osType = $registration.osType
@@ -138,6 +151,9 @@ function Invoke-LmNetworkSync {
         action = 'sync'
         agentVersion = $AgentVersion
         hostname = $env:COMPUTERNAME
+        installationId = $registration.installationId
+        machineUuidHash = $registration.machineUuidHash
+        hardwareFingerprint = $registration.hardwareFingerprint
         macAddresses = $registration.macAddresses
         localIpAddresses = $registration.localIpAddresses
         osType = $registration.osType

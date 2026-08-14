@@ -12,6 +12,7 @@ Plataforma para monitorar sessões Windows em laboratórios, detectar aplicativo
 - logs locais JSON Lines e fila de saída persistente;
 - envio em lotes para uma Edge Function do Supabase, com repetição automática quando a rede falha;
 - solicitação de acesso com aprovação em lote pelo administrador e segredo próprio por computador;
+- reconhecimento estável por hardware, com MAC e IP como validações auxiliares para evitar duplicidade após renomeação ou formatação;
 - inventário de programas via Registro do Windows, incluindo instalações de máquina e perfis carregados;
 - atualização remota do agente por tarefa criada no painel;
 - verificação de SHA-256, manifesto e, por padrão, assinatura Authenticode dos scripts atualizados;
@@ -86,7 +87,7 @@ O painel não envia comandos PowerShell arbitrários. Ele cria somente tarefas p
 Crie o pacote:
 
 ```powershell
-.\tools\New-AgentRelease.ps1 -Version 2.1.0 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
+.\tools\New-AgentRelease.ps1 -Version 2.2.0 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
 ```
 
 Depois, envie o ZIP ao bucket privado `agent-releases` e cadastre versão, caminho e SHA-256 em `agent_releases`. O painel poderá direcionar essa versão para máquinas selecionadas.

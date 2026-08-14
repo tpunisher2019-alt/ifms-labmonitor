@@ -44,7 +44,7 @@ async function loadData() {
     supabase.from("agent_releases").select("id,version,active,created_at").order("created_at", { ascending: false }),
     supabase.from("device_jobs").select("status,leased_at,completed_at,result,devices(hostname),jobs(type,created_at)").order("leased_at", { ascending: false, nullsFirst: false }).limit(50),
     supabase.from("system_settings").select("event_retention_days").eq("id", true).maybeSingle(),
-    supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at").order("last_requested_at", { ascending: false }).limit(200)
+    supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at,matched_device_id,match_score,match_reasons").order("last_requested_at", { ascending: false }).limit(200)
   ]);
   const failed = results.find((item) => item.error);
   if (failed) { message("Não foi possível carregar os dados. Verifique a configuração do Supabase.", true); return; }
@@ -78,7 +78,7 @@ function renderRequests() {
   $("pending-request-count").hidden = !pending;
   const labels = { pending: "Aguardando", approved: "Autorizado", rejected: "Recusado", claimed: "Cadastrado" };
   state.selectedRequests = new Set([...state.selectedRequests].filter((id) => state.requests.some((request) => request.id === id && request.status !== "claimed")));
-  $("request-rows").innerHTML = state.requests.map((request) => `<tr><td><input class="request-check" type="checkbox" aria-label="Selecionar ${esc(request.hostname)}" data-request="${esc(request.id)}" ${request.status === "claimed" ? "disabled" : ""} ${state.selectedRequests.has(request.id) ? "checked" : ""}></td><td><b>${esc(request.hostname)}</b><small>Agente v${esc(request.agent_version)}</small></td><td>${esc((request.mac_addresses || []).join(", "))}</td><td>${esc((request.local_ip_addresses || []).join(", "))}</td><td>${esc(request.request_ip)}</td><td>${esc(request.os_type)} ${esc(request.os_version)}</td><td>${ago(request.last_requested_at)}</td><td><span class="badge ${request.status === "pending" ? "alert" : request.status === "claimed" || request.status === "approved" ? "active" : "inactive"}">${esc(labels[request.status] || request.status)}</span></td></tr>`).join("") || emptyRow(8, "Nenhuma solicitação recebida.");
+  $("request-rows").innerHTML = state.requests.map((request) => { const matched = state.devices.find((device) => device.id === request.matched_device_id); const recognition = matched ? `<b>Mesmo PC: ${esc(matched.hostname)}</b><small>${esc((request.match_reasons || []).join(", "))}</small>` : "Novo computador"; return `<tr><td><input class="request-check" type="checkbox" aria-label="Selecionar ${esc(request.hostname)}" data-request="${esc(request.id)}" ${request.status === "claimed" ? "disabled" : ""} ${state.selectedRequests.has(request.id) ? "checked" : ""}></td><td><b>${esc(request.hostname)}</b><small>Agente v${esc(request.agent_version)}</small></td><td>${esc((request.mac_addresses || []).join(", "))}</td><td>${esc((request.local_ip_addresses || []).join(", "))}</td><td>${esc(request.request_ip)}</td><td>${esc(request.os_type)} ${esc(request.os_version)}</td><td>${recognition}</td><td>${ago(request.last_requested_at)}</td><td><span class="badge ${request.status === "pending" ? "alert" : request.status === "claimed" || request.status === "approved" ? "active" : "inactive"}">${esc(labels[request.status] || request.status)}</span></td></tr>`; }).join("") || emptyRow(9, "Nenhuma solicitação recebida.");
   document.querySelectorAll(".request-check").forEach((box) => box.addEventListener("change", () => { box.checked ? state.selectedRequests.add(box.dataset.request) : state.selectedRequests.delete(box.dataset.request); updateRequestButtons(); }));
   $("request-check-all").checked = false;
   updateRequestButtons();
@@ -90,7 +90,7 @@ function updateRequestButtons() {
 }
 
 async function loadRequests() {
-  const { data, error } = await supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at").order("last_requested_at", { ascending: false }).limit(200);
+  const { data, error } = await supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at,matched_device_id,match_score,match_reasons").order("last_requested_at", { ascending: false }).limit(200);
   if (error) return message("Não foi possível carregar as solicitações.", true);
   state.requests = data || [];
   renderRequests();
@@ -100,7 +100,7 @@ async function decideRequests(status) {
   if (!state.selectedRequests.size) return;
   const { error } = await supabase.from("device_enrollment_requests").update({ status }).in("id", [...state.selectedRequests]);
   if (error) return message("Não foi possível atualizar as solicitações.", true);
-  message(status === "approved" ? "Computadores autorizados. Eles serão cadastrados na próxima comunicação." : "Solicitações recusadas.");
+  message(status === "approved" ? "Computadores autorizados. Cadastros reconhecidos serão atualizados sem duplicação." : "Solicitações recusadas.");
   state.selectedRequests.clear();
   await loadRequests();
 }

@@ -48,6 +48,8 @@ No painel, abra **Solicitações**, confira os dados, marque uma ou mais máquin
 
 MAC, IP e nome da máquina servem para conferência administrativa, não como credencial, pois podem mudar ou ser falsificados.
 
+O identificador principal é derivado do hardware e não depende do nome definido no Windows. Se a máquina for renomeada, o mesmo cadastro recebe o novo nome. Após uma formatação, uma nova solicitação pode ser vinculada ao equipamento reconhecido, trocando a credencial e preservando o histórico anterior.
+
 ## 5. Configurar o painel
 
 No ambiente privado onde o painel será publicado, configure:

@@ -26,6 +26,39 @@ function requestIp(request: Request) {
   return (request.headers.get("x-forwarded-for")?.split(",")[0] ?? request.headers.get("cf-connecting-ip") ?? "").trim().slice(0, 128) || null;
 }
 
+function intersects(left: string[], right: unknown) {
+  const values = new Set(strings(right).map((value) => value.toUpperCase()));
+  return left.some((value) => values.has(value.toUpperCase()));
+}
+
+async function findMatchingDevice(db: ReturnType<typeof createClient>, metadata: Record<string, unknown>) {
+  const { data: devices } = await db.from("devices")
+    .select("id,hostname,hardware_fingerprint,mac_addresses,local_ip_addresses,public_ip")
+    .limit(5000);
+  let best: { id: string; score: number; reasons: string[] } | null = null;
+  for (const device of devices ?? []) {
+    let score = 0;
+    const reasons: string[] = [];
+    if (metadata.hardware_fingerprint && device.hardware_fingerprint === metadata.hardware_fingerprint) {
+      score += 100; reasons.push("mesmo hardware");
+    }
+    if (intersects(metadata.mac_addresses as string[], device.mac_addresses)) {
+      score += 70; reasons.push("mesmo MAC");
+    }
+    if (intersects(metadata.local_ip_addresses as string[], device.local_ip_addresses)) {
+      score += 15; reasons.push("mesmo IP local");
+    }
+    if (metadata.request_ip && device.public_ip === metadata.request_ip) {
+      score += 5; reasons.push("mesmo IP externo");
+    }
+    if (String(device.hostname).toUpperCase() === String(metadata.hostname).toUpperCase()) {
+      score += 20; reasons.push("mesmo nome anterior");
+    }
+    if (!best || score > best.score) best = { id: device.id, score, reasons };
+  }
+  return best && best.score >= 70 ? best : null;
+}
+
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -51,6 +84,7 @@ Deno.serve(async (request) => {
       const metadata = {
         hostname,
         machine_uuid_hash: machineUuidHash,
+        hardware_fingerprint: String(body.hardwareFingerprint ?? machineUuidHash).trim().slice(0, 64),
         mac_addresses: strings(body.macAddresses),
         local_ip_addresses: strings(body.localIpAddresses),
         request_ip: requestIp(request),
@@ -60,18 +94,22 @@ Deno.serve(async (request) => {
         last_requested_at: new Date().toISOString(),
       };
       let { data: enrollment } = await db.from("device_enrollment_requests").select("*")
-        .eq("installation_id", installationId).maybeSingle();
+        .eq("installation_id", installationId).eq("request_secret_hash", registrationHash)
+        .order("last_requested_at", { ascending: false }).limit(1).maybeSingle();
 
       if (!enrollment) {
+        const match = await findMatchingDevice(db, metadata);
         const created = await db.from("device_enrollment_requests").insert({
           installation_id: installationId,
           request_secret_hash: registrationHash,
+          matched_device_id: match?.id ?? null,
+          match_score: match?.score ?? 0,
+          match_reasons: match?.reasons ?? [],
           ...metadata,
         }).select("*").single();
         if (created.error || !created.data) return json({ error: "enrollment_request_failed" }, 409);
         enrollment = created.data;
       } else {
-        if (enrollment.request_secret_hash !== registrationHash) return json({ error: "enrollment_request_conflict" }, 409);
         const refreshed = await db.from("device_enrollment_requests").update(metadata)
           .eq("id", enrollment.id).eq("request_secret_hash", registrationHash).select("*").single();
         if (refreshed.error || !refreshed.data) return json({ error: "enrollment_request_failed" }, 409);
@@ -90,10 +128,42 @@ Deno.serve(async (request) => {
       }
       if (enrollment.status !== "approved") return json({ error: "invalid_enrollment_status" }, 409);
 
-      const { data: existingDevice } = await db.from("devices").select("id,device_secret_hash,status")
-        .eq("installation_id", installationId).maybeSingle();
-      let device = existingDevice;
-      if (device && device.device_secret_hash !== registrationHash) return json({ error: "device_identity_conflict" }, 409);
+      let device = null;
+      if (enrollment.matched_device_id) {
+        const matched = await db.from("devices").select("id,device_secret_hash,status")
+          .eq("id", enrollment.matched_device_id).maybeSingle();
+        device = matched.data;
+      }
+      if (!device) {
+        const existing = await db.from("devices").select("id,device_secret_hash,status")
+          .eq("installation_id", installationId).maybeSingle();
+        device = existing.data;
+      }
+      if (!device && metadata.hardware_fingerprint) {
+        const existing = await db.from("devices").select("id,device_secret_hash,status")
+          .eq("hardware_fingerprint", metadata.hardware_fingerprint).maybeSingle();
+        device = existing.data;
+      }
+      if (device) {
+        const rotated = await db.from("devices").update({
+          installation_id: installationId,
+          hostname,
+          device_secret_hash: registrationHash,
+          agent_version: metadata.agent_version,
+          os_type: metadata.os_type,
+          os_version: metadata.os_version,
+          hardware_fingerprint: metadata.hardware_fingerprint,
+          primary_mac: metadata.mac_addresses[0] ?? null,
+          mac_addresses: metadata.mac_addresses,
+          local_ip_addresses: metadata.local_ip_addresses,
+          public_ip: metadata.request_ip,
+          status: "online",
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", device.id).select("id,device_secret_hash,status").single();
+        if (rotated.error || !rotated.data) return json({ error: "device_reauthorization_failed" }, 409);
+        device = rotated.data;
+      }
       if (!device) {
         const createdDevice = await db.from("devices").insert({
           installation_id: installationId,
@@ -102,6 +172,7 @@ Deno.serve(async (request) => {
           agent_version: metadata.agent_version,
           os_type: metadata.os_type,
           os_version: metadata.os_version,
+          hardware_fingerprint: metadata.hardware_fingerprint,
           primary_mac: metadata.mac_addresses[0] ?? null,
           mac_addresses: metadata.mac_addresses,
           local_ip_addresses: metadata.local_ip_addresses,
@@ -147,7 +218,7 @@ Deno.serve(async (request) => {
       return json({ error: "device_auth_denied" }, 403);
     }
 
-    await db.from("devices").update({
+    const deviceUpdate: Record<string, unknown> = {
       hostname: String(body.hostname ?? "unknown").slice(0, 255),
       agent_version: String(body.agentVersion ?? "unknown"), last_seen_at: new Date().toISOString(),
       os_type: String(body.osType ?? "Windows").slice(0, 64),
@@ -155,7 +226,10 @@ Deno.serve(async (request) => {
       primary_mac: strings(body.macAddresses)[0] ?? null,
       mac_addresses: strings(body.macAddresses), local_ip_addresses: strings(body.localIpAddresses),
       public_ip: requestIp(request), updated_at: new Date().toISOString(), status: "online",
-    }).eq("id", deviceId);
+    };
+    if (body.hardwareFingerprint) deviceUpdate.hardware_fingerprint = String(body.hardwareFingerprint).slice(0, 64);
+    if (body.installationId) deviceUpdate.installation_id = String(body.installationId).slice(0, 128);
+    await db.from("devices").update(deviceUpdate).eq("id", deviceId);
 
     for (const item of Array.isArray(body.items) ? body.items : []) {
       if (item.kind === "event" && item.payload?.eventId) {
