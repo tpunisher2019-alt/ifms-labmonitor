@@ -1,10 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "enabled": false,
   "supabaseUrl": "https://SEU-PROJETO.supabase.co",
   "publishableKey": "sb_publishable_SUBSTITUA",
   "edgeFunctionName": "device-sync",
-  "enrollmentToken": "SUBSTITUA-POR-UM-TOKEN-DE-USO-UNICO",
   "syncIntervalSeconds": 300,
   "inventoryIntervalHours": 6,
   "batchSize": 100,

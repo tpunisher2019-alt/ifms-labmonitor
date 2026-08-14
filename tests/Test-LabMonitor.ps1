@@ -22,6 +22,7 @@ foreach($expected in @('roblox','minecraft','x-vpn')){Assert-True ($ids -contain
 Assert-True (-not [bool]$policy.foreground.enabled) 'Foreground deve vir desabilitado.'
 Assert-True (-not [bool]$network.enabled) 'Rede deve vir desabilitada até receber credenciais.'
 Assert-True (-not $network.PSObject.Properties['secretKey']) 'A configuração da estação não pode conter chave secreta do Supabase.'
+Assert-True (-not $network.PSObject.Properties['enrollmentToken']) 'O agente não deve depender de token de matrícula compartilhado.'
 Assert-True ([int]$network.syncIntervalSeconds -ge 300) 'Intervalo padrão deve respeitar o orçamento do plano gratuito.'
 
 Write-Host '3/6 Testando JSON Lines e fila persistente...'
@@ -36,6 +37,10 @@ try{
     Assert-True ($line.ok -and $line.value -eq 42) 'Falha na gravação JSON Lines.'
     Add-LmOutboxItem -RootPath $testRoot -Kind 'event' -Payload @{eventId=[Guid]::NewGuid();type='Test'}
     Assert-True (@(Get-ChildItem (Join-Path $testRoot 'data\outbox') -Filter '*.json').Count -eq 1) 'Fila de saída não persistiu o evento.'
+    $registration=Get-LmDeviceRegistrationInfo
+    Assert-True ($registration.installationId -match '^[a-f0-9]{64}$') 'Identificador da instalação inválido.'
+    Assert-True ($registration.machineUuidHash -match '^[a-f0-9]{64}$') 'Hash do identificador físico inválido.'
+    Assert-True ((New-LmRandomSecret) -match '^[a-f0-9]{64}$') 'Segredo local de autorização inválido.'
 
     Write-Host '4/6 Coletando inventário real do Windows...'
     $inventory=Save-LmInventorySnapshot -Path (Join-Path $testRoot 'inventory.json')
@@ -56,7 +61,8 @@ try{
 
     Write-Host '6/6 Criando e validando um pacote de atualização...'
     $releaseDirectory=Join-Path $testRoot 'releases'
-    $release=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectRoot 'tools\New-AgentRelease.ps1') -Version '2.0.0' -OutputDirectory $releaseDirectory
+    $releaseVersion=(Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
+    $release=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectRoot 'tools\New-AgentRelease.ps1') -Version $releaseVersion -OutputDirectory $releaseDirectory
     Assert-True ($LASTEXITCODE -eq 0) 'A criação do pacote de atualização falhou.'
     $zip=Get-ChildItem $releaseDirectory -Filter '*.zip'|Select-Object -First 1
     Assert-True ($null -ne $zip -and (Get-LmSha256File $zip.FullName) -match '^[a-f0-9]{64}$') 'Pacote remoto ou hash inválido.'
@@ -65,4 +71,3 @@ finally{if(Test-Path $testRoot){Remove-Item -LiteralPath $testRoot -Recurse -For
 
 if($failures.Count){Write-Host '';Write-Host 'FALHAS:' -ForegroundColor Red;foreach($failure in $failures){Write-Host "- $failure" -ForegroundColor Red};exit 1}
 Write-Host 'Todos os testes passaram.' -ForegroundColor Green
-

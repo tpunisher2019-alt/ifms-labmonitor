@@ -16,6 +16,16 @@ function randomSecret() {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function strings(value: unknown, limit = 16) {
+  return Array.isArray(value)
+    ? [...new Set(value.map((item) => String(item).trim()).filter(Boolean))].slice(0, limit)
+    : [];
+}
+
+function requestIp(request: Request) {
+  return (request.headers.get("x-forwarded-for")?.split(",")[0] ?? request.headers.get("cf-connecting-ip") ?? "").trim().slice(0, 128) || null;
+}
+
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -28,6 +38,84 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json();
+    if (body.action === "request_enrollment") {
+      const registrationSecret = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+      const installationId = String(body.installationId ?? "").trim();
+      const hostname = String(body.hostname ?? "").trim().slice(0, 255);
+      const machineUuidHash = String(body.machineUuidHash ?? "").trim().slice(0, 64);
+      if (registrationSecret.length < 32 || !installationId || !hostname || !machineUuidHash) {
+        return json({ error: "invalid_enrollment_request" }, 400);
+      }
+
+      const registrationHash = await sha256(registrationSecret);
+      const metadata = {
+        hostname,
+        machine_uuid_hash: machineUuidHash,
+        mac_addresses: strings(body.macAddresses),
+        local_ip_addresses: strings(body.localIpAddresses),
+        request_ip: requestIp(request),
+        os_type: String(body.osType ?? "Windows").slice(0, 64),
+        os_version: String(body.osVersion ?? "").slice(0, 255) || null,
+        agent_version: String(body.agentVersion ?? "unknown").slice(0, 64),
+        last_requested_at: new Date().toISOString(),
+      };
+      let { data: enrollment } = await db.from("device_enrollment_requests").select("*")
+        .eq("installation_id", installationId).maybeSingle();
+
+      if (!enrollment) {
+        const created = await db.from("device_enrollment_requests").insert({
+          installation_id: installationId,
+          request_secret_hash: registrationHash,
+          ...metadata,
+        }).select("*").single();
+        if (created.error || !created.data) return json({ error: "enrollment_request_failed" }, 409);
+        enrollment = created.data;
+      } else {
+        if (enrollment.request_secret_hash !== registrationHash) return json({ error: "enrollment_request_conflict" }, 409);
+        const refreshed = await db.from("device_enrollment_requests").update(metadata)
+          .eq("id", enrollment.id).eq("request_secret_hash", registrationHash).select("*").single();
+        if (refreshed.error || !refreshed.data) return json({ error: "enrollment_request_failed" }, 409);
+        enrollment = refreshed.data;
+      }
+
+      if (enrollment.status === "pending") return json({ enrollmentStatus: "pending", requestId: enrollment.id }, 202);
+      if (enrollment.status === "rejected") return json({ enrollmentStatus: "rejected", requestId: enrollment.id }, 403);
+      if (enrollment.status === "claimed" && enrollment.device_id) {
+        const { data: claimedDevice } = await db.from("devices").select("id,device_secret_hash,status")
+          .eq("id", enrollment.device_id).maybeSingle();
+        if (claimedDevice?.device_secret_hash === registrationHash && claimedDevice.status !== "disabled") {
+          return json({ enrollmentStatus: "authorized", deviceId: claimedDevice.id });
+        }
+        return json({ error: "enrollment_claim_invalid" }, 409);
+      }
+      if (enrollment.status !== "approved") return json({ error: "invalid_enrollment_status" }, 409);
+
+      const { data: existingDevice } = await db.from("devices").select("id,device_secret_hash,status")
+        .eq("installation_id", installationId).maybeSingle();
+      let device = existingDevice;
+      if (device && device.device_secret_hash !== registrationHash) return json({ error: "device_identity_conflict" }, 409);
+      if (!device) {
+        const createdDevice = await db.from("devices").insert({
+          installation_id: installationId,
+          hostname,
+          device_secret_hash: registrationHash,
+          agent_version: metadata.agent_version,
+          os_type: metadata.os_type,
+          os_version: metadata.os_version,
+          primary_mac: metadata.mac_addresses[0] ?? null,
+          mac_addresses: metadata.mac_addresses,
+          local_ip_addresses: metadata.local_ip_addresses,
+          public_ip: metadata.request_ip,
+        }).select("id,device_secret_hash,status").single();
+        if (createdDevice.error || !createdDevice.data) return json({ error: "device_registration_failed" }, 409);
+        device = createdDevice.data;
+      }
+      await db.from("device_enrollment_requests").update({
+        status: "claimed", claimed_at: new Date().toISOString(), device_id: device.id,
+      }).eq("id", enrollment.id).eq("status", "approved");
+      return json({ enrollmentStatus: "authorized", deviceId: device.id });
+    }
+
     if (body.action === "enroll") {
       if (!body.enrollmentToken || !body.installationId || !body.hostname) return json({ error: "invalid_enrollment" }, 400);
       const tokenHash = await sha256(String(body.enrollmentToken));
@@ -62,7 +150,11 @@ Deno.serve(async (request) => {
     await db.from("devices").update({
       hostname: String(body.hostname ?? "unknown").slice(0, 255),
       agent_version: String(body.agentVersion ?? "unknown"), last_seen_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(), status: "online",
+      os_type: String(body.osType ?? "Windows").slice(0, 64),
+      os_version: String(body.osVersion ?? "").slice(0, 255) || null,
+      primary_mac: strings(body.macAddresses)[0] ?? null,
+      mac_addresses: strings(body.macAddresses), local_ip_addresses: strings(body.localIpAddresses),
+      public_ip: requestIp(request), updated_at: new Date().toISOString(), status: "online",
     }).eq("id", deviceId);
 
     for (const item of Array.isArray(body.items) ? body.items : []) {

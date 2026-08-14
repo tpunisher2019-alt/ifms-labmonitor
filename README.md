@@ -11,7 +11,7 @@ Plataforma para monitorar sessões Windows em laboratórios, detectar aplicativo
 - agrupamento por sessão com primeira/última detecção e contagem de execuções;
 - logs locais JSON Lines e fila de saída persistente;
 - envio em lotes para uma Edge Function do Supabase, com repetição automática quando a rede falha;
-- cadastro individual de cada computador com token de uso único e segredo próprio;
+- solicitação de acesso com aprovação em lote pelo administrador e segredo próprio por computador;
 - inventário de programas via Registro do Windows, incluindo instalações de máquina e perfis carregados;
 - atualização remota do agente por tarefa criada no painel;
 - verificação de SHA-256, manifesto e, por padrão, assinatura Authenticode dos scripts atualizados;
@@ -63,8 +63,8 @@ Consulte [docs/CONFIGURAR-SUPABASE.md](docs/CONFIGURAR-SUPABASE.md). Em resumo:
 1. crie um projeto Supabase;
 2. aplique `supabase/migrations/001_labmonitor_v2.sql`;
 3. publique a função `supabase/functions/device-sync`;
-4. gere um token de matrícula para cada computador;
-5. edite `config\network.json` na instalação e altere `enabled` para `true`;
+4. edite `config\network.json` na instalação e altere `enabled` para `true`;
+5. autorize as máquinas solicitantes no painel;
 6. configure `SUPABASE_URL` e `SUPABASE_SECRET_KEY` somente no servidor do painel.
 
 Nunca coloque a chave secreta ou `service_role` nas estações. Elas recebem apenas a chave publicável e um segredo individual de dispositivo.
@@ -86,7 +86,7 @@ O painel não envia comandos PowerShell arbitrários. Ele cria somente tarefas p
 Crie o pacote:
 
 ```powershell
-.\tools\New-AgentRelease.ps1 -Version 2.0.0 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
+.\tools\New-AgentRelease.ps1 -Version 2.1.0 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
 ```
 
 Depois, envie o ZIP ao bucket privado `agent-releases` e cadastre versão, caminho e SHA-256 em `agent_releases`. O painel poderá direcionar essa versão para máquinas selecionadas.

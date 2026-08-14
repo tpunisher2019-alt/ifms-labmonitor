@@ -34,18 +34,7 @@ Publique `supabase/functions/device-sync`. A função usa autenticação própri
 
 A função recebe automaticamente `SUPABASE_URL` e a chave secreta no ambiente do Supabase. Nunca copie essa chave para `network.json`.
 
-## 4. Matricular uma estação
-
-Gere um token aleatório diferente para cada máquina. No SQL Editor, armazene somente o hash:
-
-```sql
-insert into public.enrollment_tokens(token_hash, label, expires_at)
-values (
-  encode(digest('TOKEN-ALEATORIO-DA-MAQUINA', 'sha256'), 'hex'),
-  'LAB01-PC01',
-  now() + interval '7 days'
-);
-```
+## 4. Autorizar uma estação
 
 Na estação, como administrador, edite:
 
@@ -53,9 +42,11 @@ Na estação, como administrador, edite:
 %ProgramData%\IFMS\LabMonitor\config\network.json
 ```
 
-Preencha URL, chave publicável e o token em texto; defina `enabled` como `true`. No primeiro contato, o token é consumido e um segredo individual passa a ser armazenado em `data\state\device-identity.json`, acessível apenas a SYSTEM e administradores.
+Preencha a URL e a chave publicável; defina `enabled` como `true`. No primeiro contato, o agente envia uma solicitação contendo nome da máquina, MAC, IP local, IP externo observado pelo servidor e versão do Windows.
 
-Depois do cadastro, remova o `enrollmentToken` do arquivo de configuração.
+No painel, abra **Solicitações**, confira os dados, marque uma ou mais máquinas e clique em **Autorizar selecionados**. Cada agente cria localmente um segredo aleatório; o banco armazena somente o hash. Após a autorização, somente o computador que originou a solicitação consegue concluir o cadastro.
+
+MAC, IP e nome da máquina servem para conferência administrativa, não como credencial, pois podem mudar ou ser falsificados.
 
 ## 5. Configurar o painel
 

@@ -4,7 +4,7 @@ const config = window.LABMONITOR_CONFIG || {};
 const configured = /^https:\/\/.+\.supabase\.co$/.test(config.supabaseUrl || "") && !String(config.publishableKey || "").includes("SUBSTITUA");
 const supabase = configured ? createClient(config.supabaseUrl, config.publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const $ = (id) => document.getElementById(id);
-const state = { profile: null, devices: [], events: [], software: [], releases: [], jobs: [], selected: new Set(), retentionDays: 90 };
+const state = { profile: null, devices: [], events: [], software: [], releases: [], jobs: [], requests: [], selected: new Set(), selectedRequests: new Set(), retentionDays: 90 };
 const eventLabels = { ProhibitedApplicationDetected: "Aplicativo proibido detectado", SessionLocked: "Sessão bloqueada", SessionUnlocked: "Sessão desbloqueada", SessionStarted: "Login registrado", SessionEnded: "Logout registrado" };
 const esc = (value) => String(value ?? "—").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const eventName = (value) => eventLabels[value] || value;
@@ -38,17 +38,19 @@ function showLogin() { state.profile = null; $("app-view").hidden = true; $("log
 async function loadData() {
   message("");
   const results = await Promise.all([
-    supabase.from("devices").select("id,hostname,agent_version,status,last_seen_at,inventory_collected_at,os_type,os_version").order("hostname"),
+    supabase.from("devices").select("id,hostname,agent_version,status,last_seen_at,inventory_collected_at,os_type,os_version,primary_mac,local_ip_addresses,public_ip").order("hostname"),
     supabase.from("device_events").select("event_id,occurred_at,event_type,user_name,payload,devices(hostname)").order("occurred_at", { ascending: false }).limit(100),
     supabase.from("software_inventory").select("device_id,inventory_key,name,version,publisher,scope,architecture,devices(hostname)").order("name").limit(5000),
     supabase.from("agent_releases").select("id,version,active,created_at").order("created_at", { ascending: false }),
     supabase.from("device_jobs").select("status,leased_at,completed_at,result,devices(hostname),jobs(type,created_at)").order("leased_at", { ascending: false, nullsFirst: false }).limit(50),
-    supabase.from("system_settings").select("event_retention_days").eq("id", true).maybeSingle()
+    supabase.from("system_settings").select("event_retention_days").eq("id", true).maybeSingle(),
+    supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at").order("last_requested_at", { ascending: false }).limit(200)
   ]);
   const failed = results.find((item) => item.error);
   if (failed) { message("Não foi possível carregar os dados. Verifique a configuração do Supabase.", true); return; }
   [state.devices, state.events, state.software, state.releases, state.jobs] = results.slice(0, 5).map((item) => item.data || []);
   state.retentionDays = results[5].data?.event_retention_days || 90;
+  state.requests = results[6].data || [];
   render();
 }
 
@@ -59,14 +61,48 @@ function render() {
   $("metric-software").textContent = state.software.length;
   $("overview-devices").innerHTML = state.devices.slice(0, 10).map((d) => `<tr><td><b>${esc(d.hostname)}</b></td><td>${esc(d.os_type || "Windows")} ${esc(d.os_version || "")}</td><td><span class="status ${isOnline(d) ? "online" : ""}"><i></i>${isOnline(d) ? "Online" : "Offline"}</span></td><td>v${esc(d.agent_version)}</td></tr>`).join("") || emptyRow(4, "Nenhum computador cadastrado.");
   $("recent-events").innerHTML = state.events.slice(0, 6).map((e) => `<div class="event-item"><b>${esc(eventName(e.event_type))}</b><small>${esc(e.devices?.hostname)} • ${esc(e.user_name || "SYSTEM")} • ${ago(e.occurred_at)}</small></div>`).join("") || '<div class="empty">Nenhum evento recebido.</div>';
-  $("device-rows").innerHTML = state.devices.map((d) => `<tr><td><input class="device-check" type="checkbox" aria-label="Selecionar ${esc(d.hostname)}" data-device="${esc(d.id)}" ${state.profile.role !== "admin" ? "disabled" : ""}></td><td><b>${esc(d.hostname)}</b></td><td>${esc(d.os_type || "Windows")} ${esc(d.os_version || "")}</td><td><span class="status ${isOnline(d) ? "online" : ""}"><i></i>${isOnline(d) ? "Online" : "Offline"}</span></td><td>v${esc(d.agent_version)}</td><td>${counts.get(d.id) || 0}</td><td>${ago(d.last_seen_at)}</td></tr>`).join("") || emptyRow(7, "Nenhum computador cadastrado.");
+  $("device-rows").innerHTML = state.devices.map((d) => `<tr><td><input class="device-check" type="checkbox" aria-label="Selecionar ${esc(d.hostname)}" data-device="${esc(d.id)}" ${state.profile.role !== "admin" ? "disabled" : ""}></td><td><b>${esc(d.hostname)}</b></td><td>${esc(d.os_type || "Windows")} ${esc(d.os_version || "")}</td><td>${esc(d.primary_mac)}</td><td>${esc((d.local_ip_addresses || []).join(", ") || d.public_ip)}</td><td><span class="status ${isOnline(d) ? "online" : ""}"><i></i>${isOnline(d) ? "Online" : "Offline"}</span></td><td>v${esc(d.agent_version)}</td><td>${counts.get(d.id) || 0}</td><td>${ago(d.last_seen_at)}</td></tr>`).join("") || emptyRow(9, "Nenhum computador cadastrado.");
   $("event-count").textContent = `${state.events.length} eventos`; $("event-rows").innerHTML = state.events.map((e) => `<tr><td>${new Date(e.occurred_at).toLocaleString("pt-BR")}</td><td><span class="badge ${e.event_type === "ProhibitedApplicationDetected" ? "alert" : ""}">${esc(eventName(e.event_type))}</span></td><td>${esc(e.devices?.hostname)}</td><td>${esc(e.user_name || "SYSTEM")}</td><td>${esc(e.payload?.displayName || e.payload?.processName || "—")}</td></tr>`).join("") || emptyRow(5, "Nenhuma ocorrência recebida.");
   $("software-device").innerHTML = '<option value="">Todos os computadores</option>' + state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.hostname)}</option>`).join("");
   $("inventory-count").textContent = `${state.software.length} instalações`; renderSoftware();
   $("release-select").innerHTML = '<option value="">Selecione uma versão</option>' + state.releases.filter((r) => r.active).map((r) => `<option value="${esc(r.id)}">Versão ${esc(r.version)}</option>`).join("");
   $("job-rows").innerHTML = state.jobs.map((j) => `<tr><td>${esc(j.devices?.hostname)}</td><td>${j.jobs?.type === "agent_update" ? "Atualizar agente" : "Atualizar inventário"}</td><td><span class="badge">${esc(j.status)}</span></td><td>${j.leased_at ? new Date(j.leased_at).toLocaleString("pt-BR") : "Aguardando"}</td><td>${esc(j.result?.message || "—")}</td></tr>`).join("") || emptyRow(5, "Nenhuma tarefa enviada.");
   $("retention-days").value = String(state.retentionDays);
+  renderRequests();
   bindDeviceChecks();
+}
+
+function renderRequests() {
+  const pending = state.requests.filter((request) => request.status === "pending").length;
+  $("pending-request-count").textContent = String(pending);
+  $("pending-request-count").hidden = !pending;
+  const labels = { pending: "Aguardando", approved: "Autorizado", rejected: "Recusado", claimed: "Cadastrado" };
+  state.selectedRequests = new Set([...state.selectedRequests].filter((id) => state.requests.some((request) => request.id === id && request.status !== "claimed")));
+  $("request-rows").innerHTML = state.requests.map((request) => `<tr><td><input class="request-check" type="checkbox" aria-label="Selecionar ${esc(request.hostname)}" data-request="${esc(request.id)}" ${request.status === "claimed" ? "disabled" : ""} ${state.selectedRequests.has(request.id) ? "checked" : ""}></td><td><b>${esc(request.hostname)}</b><small>Agente v${esc(request.agent_version)}</small></td><td>${esc((request.mac_addresses || []).join(", "))}</td><td>${esc((request.local_ip_addresses || []).join(", "))}</td><td>${esc(request.request_ip)}</td><td>${esc(request.os_type)} ${esc(request.os_version)}</td><td>${ago(request.last_requested_at)}</td><td><span class="badge ${request.status === "pending" ? "alert" : request.status === "claimed" || request.status === "approved" ? "active" : "inactive"}">${esc(labels[request.status] || request.status)}</span></td></tr>`).join("") || emptyRow(8, "Nenhuma solicitação recebida.");
+  document.querySelectorAll(".request-check").forEach((box) => box.addEventListener("change", () => { box.checked ? state.selectedRequests.add(box.dataset.request) : state.selectedRequests.delete(box.dataset.request); updateRequestButtons(); }));
+  $("request-check-all").checked = false;
+  updateRequestButtons();
+}
+
+function updateRequestButtons() {
+  $("approve-requests").disabled = !state.selectedRequests.size;
+  $("reject-requests").disabled = !state.selectedRequests.size;
+}
+
+async function loadRequests() {
+  const { data, error } = await supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at").order("last_requested_at", { ascending: false }).limit(200);
+  if (error) return message("Não foi possível carregar as solicitações.", true);
+  state.requests = data || [];
+  renderRequests();
+}
+
+async function decideRequests(status) {
+  if (!state.selectedRequests.size) return;
+  const { error } = await supabase.from("device_enrollment_requests").update({ status }).in("id", [...state.selectedRequests]);
+  if (error) return message("Não foi possível atualizar as solicitações.", true);
+  message(status === "approved" ? "Computadores autorizados. Eles serão cadastrados na próxima comunicação." : "Solicitações recusadas.");
+  state.selectedRequests.clear();
+  await loadRequests();
 }
 
 function renderSoftware() { const query = $("software-search").value.trim().toLowerCase(); const device = $("software-device").value; const rows = state.software.filter((s) => (!device || s.device_id === device) && (!query || s.name.toLowerCase().includes(query) || (s.publisher || "").toLowerCase().includes(query))); $("software-rows").innerHTML = rows.map((s) => `<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.version)}</td><td>${esc(s.publisher)}</td><td>${esc(s.devices?.hostname)}</td><td>${esc(s.scope)}</td><td>${esc(s.architecture)}</td></tr>`).join("") || emptyRow(6, "Nenhum software encontrado."); }
@@ -84,9 +120,12 @@ async function loadUsers() { try { const data = await adminFunction("list"); mes
 
 $("login-form").addEventListener("submit", async (event) => { event.preventDefault(); loginMessage(""); const { data, error } = await supabase.auth.signInWithPassword({ email: $("login-email").value.trim(), password: $("login-password").value }); if (error) return loginMessage("E-mail ou senha inválidos."); await enterApp(data.user); });
 $("logout-button").addEventListener("click", async () => { await supabase.auth.signOut(); showLogin(); });
-$("navigation").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (!button) return; document.querySelectorAll(".navigation button,.view").forEach((el) => el.classList.remove("active")); button.classList.add("active"); $(`view-${button.dataset.view}`).classList.add("active"); $("page-title").textContent = $("breadcrumb").textContent = button.textContent.trim(); if (button.dataset.view === "users") loadUsers(); });
+$("navigation").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (!button) return; document.querySelectorAll(".navigation button,.view").forEach((el) => el.classList.remove("active")); button.classList.add("active"); $(`view-${button.dataset.view}`).classList.add("active"); $("page-title").textContent = $("breadcrumb").textContent = button.childNodes[0].textContent.trim(); if (button.dataset.view === "users") loadUsers(); if (button.dataset.view === "requests") loadRequests(); });
 $("software-search").addEventListener("input", renderSoftware); $("software-device").addEventListener("change", renderSoftware); $("release-select").addEventListener("change", () => { $("send-update").disabled = !state.selected.size || !$("release-select").value; });
 $("inventory-refresh").addEventListener("click", () => createJob("inventory_refresh")); $("send-update").addEventListener("click", () => createJob("agent_update", $("release-select").value));
+$("request-check-all").addEventListener("change", (event) => { document.querySelectorAll(".request-check:not(:disabled)").forEach((box) => { box.checked = event.target.checked; box.checked ? state.selectedRequests.add(box.dataset.request) : state.selectedRequests.delete(box.dataset.request); }); updateRequestButtons(); });
+$("approve-requests").addEventListener("click", () => decideRequests("approved"));
+$("reject-requests").addEventListener("click", () => decideRequests("rejected"));
 $("save-retention").addEventListener("click", async () => { const { error } = await supabase.from("system_settings").update({ event_retention_days: Number($("retention-days").value), updated_at: new Date().toISOString(), updated_by: state.profile.email }).eq("id", true); message(error ? "Não foi possível salvar a política." : "Política de retenção salva.", Boolean(error)); });
 $("user-form").addEventListener("submit", async (event) => { event.preventDefault(); try { await adminFunction("create", { fullName: $("user-name").value.trim(), email: $("user-email").value.trim(), password: $("user-password").value, role: $("user-role").value }); event.target.reset(); message("Usuário cadastrado com sucesso."); await loadUsers(); } catch { message("Não foi possível cadastrar. Confira o e-mail institucional e a senha.", true); } });
 
