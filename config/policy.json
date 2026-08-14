@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "policyId": "ifms-lab-default-v1",
+  "source": "local",
+  "pollIntervalSeconds": 5,
+  "rules": [
+    {
+      "id": "roblox",
+      "displayName": "Roblox",
+      "enabled": true,
+      "severity": "high",
+      "match": {
+        "processNames": ["RobloxPlayerBeta.exe", "RobloxStudioBeta.exe"],
+        "pathRegex": "(?i)\\\\Roblox\\\\"
+      }
+    },
+    {
+      "id": "minecraft",
+      "displayName": "Minecraft",
+      "enabled": true,
+      "severity": "high",
+      "match": {
+        "processNames": ["Minecraft.exe", "MinecraftLauncher.exe", "Minecraft.Windows.exe"],
+        "pathRegex": "(?i)(minecraft|\\\\.minecraft\\\\)"
+      }
+    },
+    {
+      "id": "x-vpn",
+      "displayName": "X-VPN",
+      "enabled": true,
+      "severity": "critical",
+      "match": {
+        "processNames": ["X-VPN.exe", "XVPN.exe"],
+        "pathRegex": "(?i)\\\\X-?VPN\\\\"
+      }
+    }
+  ],
+  "futureRemotePolicy": {
+    "enabled": false,
+    "endpoint": null,
+    "refreshSeconds": 300
+  },
+  "foreground": {
+    "enabled": false,
+    "provider": null,
+    "note": "Ponto de extensao reservado. Nao monitora teclas nem janelas na versao 1."
+  }
+}

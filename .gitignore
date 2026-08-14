@@ -1,0 +1,13 @@
+**/.env
+**/.env.local
+**/node_modules/
+**/.next/
+**/.vinext/
+**/.wrangler/
+**/dist/
+**/outputs/
+.pnpm-store/
+**/device-identity.json
+config/network.json
+work/*
+*.log

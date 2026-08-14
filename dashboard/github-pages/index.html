@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Monitoramento institucional dos laboratórios de informática do IFMS">
+  <meta name="theme-color" content="#176b2b">
+  <title>IFMS LabMonitor</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section id="login-view" class="login-view">
+    <main class="login-card">
+      <div class="ifms-brand"><span class="ifms-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i><i class="round"></i><i></i><i></i><i></i><i></i></span><span><strong>IFMS</strong><small>LabMonitor</small></span></div>
+      <span class="eyebrow">ACESSO INSTITUCIONAL</span>
+      <h1>Gestão segura dos laboratórios</h1>
+      <p>Entre com o e-mail institucional e a senha cadastrada pelo administrador.</p>
+      <form id="login-form" class="form-stack">
+        <label for="login-email">E-mail</label>
+        <input id="login-email" type="email" autocomplete="username" required placeholder="nome@ifms.edu.br">
+        <label for="login-password">Senha</label>
+        <input id="login-password" type="password" autocomplete="current-password" required>
+        <button class="button primary" type="submit">Entrar</button>
+      </form>
+      <p id="login-message" class="message error" hidden></p>
+      <small class="security-note">A senha é protegida pelo Supabase Auth e nunca fica armazenada em texto legível.</small>
+    </main>
+  </section>
+
+  <div id="app-view" class="shell" hidden>
+    <aside class="sidebar">
+      <div class="ifms-brand side-brand"><span class="ifms-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i><i class="round"></i><i></i><i></i><i></i><i></i></span><span><strong>IFMS</strong><small>LabMonitor</small></span></div>
+      <nav id="navigation" class="navigation" aria-label="Navegação principal">
+        <button class="active" data-view="overview">Visão geral</button>
+        <button data-view="devices">Computadores</button>
+        <button data-view="events">Ocorrências</button>
+        <button data-view="inventory">Inventário</button>
+        <button data-view="updates" data-admin>Atualizações</button>
+        <button data-view="users" data-admin>Usuários</button>
+        <button data-view="retention" data-admin>Retenção</button>
+      </nav>
+      <div class="sidebar-status"><i></i><span>Sincronização automática</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <span>Laboratórios / <b id="breadcrumb">Visão geral</b></span>
+        <div class="profile"><span id="avatar" class="avatar">IF</span><span><b id="profile-name">Usuário IFMS</b><small id="profile-role">Monitor</small></span><button id="logout-button" class="text-button">Sair</button></div>
+      </header>
+      <div class="content">
+        <div class="heading"><div><h1 id="page-title">Visão geral</h1><p>Monitoramento das estações Windows e Ubuntu.</p></div><span id="connection-badge" class="live">● Atualização automática</span></div>
+        <p id="app-message" class="message" hidden></p>
+
+        <section id="view-overview" class="view active">
+          <div class="metrics">
+            <article class="metric"><span>Computadores</span><b id="metric-devices">0</b><small>cadastrados</small></article>
+            <article class="metric"><span>Online agora</span><b id="metric-online">0</b><small>últimos 5 minutos</small></article>
+            <article class="metric alert"><span>Ocorrências recentes</span><b id="metric-alerts">0</b><small>últimas 24 horas</small></article>
+            <article class="metric"><span>Softwares catalogados</span><b id="metric-software">0</b><small>instalações encontradas</small></article>
+          </div>
+          <div class="columns"><article class="panel"><header><b>Estado das estações</b><span>última comunicação</span></header><div class="table-wrap"><table><thead><tr><th>Computador</th><th>Sistema</th><th>Estado</th><th>Agente</th></tr></thead><tbody id="overview-devices"></tbody></table></div></article><article class="panel"><header><b>Atividade recente</b><span>eventos</span></header><div id="recent-events" class="event-list"></div></article></div>
+        </section>
+
+        <section id="view-devices" class="view"><article class="panel"><header><b>Computadores cadastrados</b><button id="inventory-refresh" class="button primary" data-admin disabled>Solicitar inventário</button></header><div class="table-wrap"><table><thead><tr><th></th><th>Computador</th><th>Sistema</th><th>Estado</th><th>Agente</th><th>Softwares</th><th>Último contato</th></tr></thead><tbody id="device-rows"></tbody></table></div></article></section>
+        <section id="view-events" class="view"><article class="panel"><header><b>Registro de ocorrências</b><span id="event-count">0 eventos</span></header><div class="table-wrap"><table><thead><tr><th>Horário</th><th>Evento</th><th>Computador</th><th>Usuário</th><th>Detalhe</th></tr></thead><tbody id="event-rows"></tbody></table></div></article></section>
+        <section id="view-inventory" class="view"><article class="panel"><header><b>Inventário consolidado</b><span id="inventory-count">0 instalações</span></header><div class="filters"><input id="software-search" placeholder="Buscar software ou fabricante"><select id="software-device"><option value="">Todos os computadores</option></select></div><div class="table-wrap"><table><thead><tr><th>Software</th><th>Versão</th><th>Fabricante</th><th>Computador</th><th>Origem</th><th>Arquitetura</th></tr></thead><tbody id="software-rows"></tbody></table></div></article></section>
+        <section id="view-updates" class="view"><article class="panel"><header><b>Atualização do agente</b><button id="send-update" class="button primary" disabled>Enviar atualização</button></header><div class="form-row"><label for="release-select">Versão disponível</label><select id="release-select"><option value="">Selecione uma versão</option></select></div><div class="table-wrap"><table><thead><tr><th>Computador</th><th>Tarefa</th><th>Estado</th><th>Início</th><th>Resultado</th></tr></thead><tbody id="job-rows"></tbody></table></div></article></section>
+        <section id="view-users" class="view"><article class="panel"><header><b>Usuários autorizados</b><span>administradores e monitores</span></header><form id="user-form" class="user-form"><label>Nome completo<input id="user-name" required minlength="3"></label><label>E-mail institucional<input id="user-email" type="email" required placeholder="nome@ifms.edu.br"></label><label>Senha temporária<input id="user-password" type="password" required minlength="10" autocomplete="new-password"></label><label>Perfil<select id="user-role"><option value="monitor">Monitor</option><option value="admin">Administrador</option></select></label><button class="button primary" type="submit">Cadastrar</button></form><div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Estado</th><th>Ação</th></tr></thead><tbody id="user-rows"></tbody></table></div></article></section>
+        <section id="view-retention" class="view"><article class="panel"><header><b>Retenção dos eventos</b><span>configuração administrativa</span></header><div class="retention"><div><b>Manter ocorrências por</b><p>Máquinas, inventário, versões e tarefas permanecem.</p></div><select id="retention-days"><option value="30">30 dias</option><option value="60">60 dias</option><option value="90">90 dias</option><option value="180">180 dias</option><option value="365">1 ano</option></select><button id="save-retention" class="button primary">Salvar política</button></div></article></section>
+      </div>
+    </main>
+  </div>
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
