@@ -21,7 +21,7 @@ Deno.serve(async(request)=>{
   }
   if(body.action==="create"){
     const email=String(body.email||"").trim().toLowerCase(),fullName=String(body.fullName||"").trim(),password=String(body.password||""),role=body.role==="admin"?"admin":body.role==="monitor"?"monitor":"";
-    if(!/^[^\s@]+@ifms\.edu\.br$/i.test(email)||fullName.length<3||password.length<10||!role)return reply({error:"invalid_input"},400);
+    if(!/^[^\s@]+@ifms\.edu\.br$/i.test(email)||fullName.length<3||password.length<7||!role)return reply({error:"invalid_input"},400);
     const response=await fetch(`${url}/auth/v1/admin/users`,{method:"POST",headers:baseHeaders,body:JSON.stringify({email,password,email_confirm:true,user_metadata:{full_name:fullName}})});
     const user=await response.json(); if(!response.ok)return reply({error:"create_failed",detail:user?.msg||user?.message},400);
     const update=await fetch(`${url}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}`,{method:"PATCH",headers:{...baseHeaders,Prefer:"return=minimal"},body:JSON.stringify({full_name:fullName,role,active:true,updated_at:new Date().toISOString()})});

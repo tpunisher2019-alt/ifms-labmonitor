@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render() {
@@ -19,4 +20,12 @@ test("renderiza o login protegido do LabMonitor", async () => {
   assert.match(html, /name="password"/);
   assert.match(html, /nunca ficam armazenadas em texto legível/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview/);
+});
+
+test("aceita senha temporária baseada em SIAPE com 7 caracteres", async () => {
+  const page = await readFile(new URL("../github-pages/index.html", import.meta.url), "utf8");
+  const edgeFunction = await readFile(new URL("../../supabase/functions/admin-users/index.ts", import.meta.url), "utf8");
+
+  assert.match(page, /id="user-password"[^>]+minlength="7"/);
+  assert.match(edgeFunction, /password\.length<7/);
 });

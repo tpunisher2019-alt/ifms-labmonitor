@@ -195,7 +195,7 @@ async function createUser(request, env) {
   if (name.length < 3 || name.length > 120) return json({ error: "invalid_name" }, 400);
   if (!/^[^\s@]+@ifms\.edu\.br$/i.test(email)) return json({ error: "institutional_email_required" }, 400);
   if (!role) return json({ error: "invalid_role" }, 400);
-  if (password.length < 10 || password.length > 128) return json({ error: "weak_password" }, 400);
+  if (password.length < 7 || password.length > 128) return json({ error: "weak_password" }, 400);
   const now = new Date().toISOString();
   const salt = randomBase64(16);
   const passwordHash = await derivePassword(password, salt);
@@ -256,13 +256,13 @@ const role=${JSON.stringify(user.role)};if(role!=="admin")document.querySelector
 if(role==='admin'){
   const passwordField=document.createElement('div');
   passwordField.className='field';
-  passwordField.innerHTML='<label>SENHA TEMPORÁRIA</label><input id="userPassword" required type="password" minlength="10" autocomplete="new-password" placeholder="Mínimo de 10 caracteres">';
+  passwordField.innerHTML='<label>SENHA TEMPORÁRIA</label><input id="userPassword" required type="password" minlength="7" autocomplete="new-password" placeholder="SIAPE (mínimo 7 caracteres)">';
   userForm.insertBefore(passwordField,userRole.parentElement);
   userForm.onsubmit=async e=>{
     e.preventDefault();
     const r=await fetch('/api/users',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:userName.value,email:userEmail.value,password:userPassword.value,role:userRole.value})});
     userMessage.hidden=false;
-    userMessage.textContent=r.ok?'Usuário cadastrado com senha protegida.':'Revise os dados; use e-mail @ifms.edu.br e senha com pelo menos 10 caracteres.';
+    userMessage.textContent=r.ok?'Usuário cadastrado com senha protegida.':'Revise os dados; use e-mail @ifms.edu.br e senha com pelo menos 7 caracteres.';
     if(r.ok){userForm.reset();loadUsers()}
   };
 }
