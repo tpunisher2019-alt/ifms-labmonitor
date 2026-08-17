@@ -5,10 +5,10 @@ const configured = /^https:\/\/.+\.supabase\.co$/.test(config.supabaseUrl || "")
 const supabase = configured ? createClient(config.supabaseUrl, config.publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const $ = (id) => document.getElementById(id);
 const state = { profile: null, devices: [], events: [], software: [], releases: [], jobs: [], requests: [], selected: new Set(), selectedRequests: new Set(), retentionDays: 90 };
-const eventLabels = { ProhibitedApplicationDetected: "Aplicativo proibido detectado", SessionLocked: "Sessão bloqueada", SessionUnlocked: "Sessão desbloqueada", SessionStarted: "Login registrado", SessionEnded: "Logout registrado" };
+const eventLabels = { ProhibitedApplicationDetected: "Aplicativo proibido detectado", ProhibitedApplicationStopped: "Aplicativo proibido encerrado", SuspiciousApplicationDetected: "Aplicativo suspeito detectado", SuspiciousApplicationStopped: "Aplicativo suspeito encerrado" };
 const esc = (value) => String(value ?? "—").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const eventName = (value) => eventLabels[value] || value;
-const isOnline = (device) => Date.now() - new Date(device.last_seen_at).getTime() < 300000;
+const isOnline = (device) => Date.now() - new Date(device.last_seen_at).getTime() < 1500000;
 const ago = (iso) => { const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); return minutes < 1 ? "agora" : minutes < 60 ? `há ${minutes} min` : minutes < 1440 ? `há ${Math.round(minutes / 60)} h` : `há ${Math.round(minutes / 1440)} d`; };
 
 function message(text, error = false) { const el = $("app-message"); el.textContent = text; el.className = `message${error ? " error" : ""}`; el.hidden = !text; }

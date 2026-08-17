@@ -4,8 +4,7 @@
   "supabaseUrl": "https://SEU-PROJETO.supabase.co",
   "publishableKey": "sb_publishable_SUBSTITUA",
   "edgeFunctionName": "device-sync",
-  "syncIntervalSeconds": 300,
-  "inventoryIntervalHours": 6,
+  "syncIntervalSeconds": 1200,
   "batchSize": 100,
   "requestTimeoutSeconds": 30,
   "updates": {

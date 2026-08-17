@@ -6,6 +6,7 @@
 **/.wrangler/
 **/dist/
 **/outputs/
+releases/
 .pnpm-store/
 **/device-identity.json
 config/network.json

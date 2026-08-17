@@ -20,6 +20,20 @@ if ((Test-Path -LiteralPath $InstallPath) -and -not $Force) {
     if ($existing) { throw "O LabMonitor já parece instalado. Use -Force para atualizar mantendo os dados." }
 }
 
+# Durante uma atualização, encerra o agente antigo antes de substituir os
+# scripts. O observador de sessão pode continuar ativo porque somente grava na
+# caixa de entrada; o novo agente processará esses eventos com a política atual.
+$existingAgentTask = Get-ScheduledTask -TaskName $agentTaskName -ErrorAction SilentlyContinue
+if ($existingAgentTask) {
+    Stop-ScheduledTask -TaskName $agentTaskName -ErrorAction SilentlyContinue
+}
+$escapedInstallPath = [Regex]::Escape([IO.Path]::GetFullPath($InstallPath))
+Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.ProcessId -ne $PID -and $_.CommandLine -match $escapedInstallPath -and $_.CommandLine -match 'Agent\.ps1'
+} | ForEach-Object {
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+}
+
 $directories = @(
     $InstallPath,
     (Join-Path $InstallPath 'src'),
@@ -40,14 +54,29 @@ Copy-Item -LiteralPath (Join-Path $sourceRoot 'config\policy.json') -Destination
 if (-not (Test-Path -LiteralPath (Join-Path $InstallPath 'config\policy.json'))) {
     Copy-Item -LiteralPath (Join-Path $sourceRoot 'config\policy.json') -Destination (Join-Path $InstallPath 'config\policy.json') -Force
 }
-if (-not (Test-Path -LiteralPath (Join-Path $InstallPath 'config\network.json'))) {
-    $packagedNetworkConfig = Join-Path $sourceRoot 'config\network.json'
-    $networkConfigSource = if (Test-Path -LiteralPath $packagedNetworkConfig) {
-        $packagedNetworkConfig
-    } else {
-        Join-Path $sourceRoot 'config\network.example.json'
-    }
+$packagedNetworkConfig = Join-Path $sourceRoot 'config\network.json'
+$networkConfigSource = if (Test-Path -LiteralPath $packagedNetworkConfig) {
+    $packagedNetworkConfig
+} else {
+    Join-Path $sourceRoot 'config\network.example.json'
+}
+$installedNetworkConfig = Join-Path $InstallPath 'config\network.json'
+if (-not (Test-Path -LiteralPath $installedNetworkConfig)) {
     Copy-Item -LiteralPath $networkConfigSource -Destination (Join-Path $InstallPath 'config\network.json') -Force
+} elseif (Test-Path -LiteralPath $networkConfigSource) {
+    $currentNetwork = Get-Content -LiteralPath $installedNetworkConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+    $newDefaults = Get-Content -LiteralPath $networkConfigSource -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($currentNetwork.PSObject.Properties['syncIntervalSeconds']) {
+        $currentNetwork.syncIntervalSeconds = [int]$newDefaults.syncIntervalSeconds
+    } else {
+        $currentNetwork | Add-Member -NotePropertyName syncIntervalSeconds -NotePropertyValue ([int]$newDefaults.syncIntervalSeconds)
+    }
+    if ($currentNetwork.PSObject.Properties['inventoryIntervalHours']) {
+        $currentNetwork.PSObject.Properties.Remove('inventoryIntervalHours')
+    }
+    $temporaryNetwork = $installedNetworkConfig + '.new'
+    [IO.File]::WriteAllText($temporaryNetwork, ($currentNetwork | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temporaryNetwork -Destination $installedNetworkConfig -Force
 }
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'uninstall.ps1') -Destination (Join-Path $InstallPath 'uninstall.ps1') -Force
 
@@ -75,7 +104,7 @@ $watcherAction = New-ScheduledTaskAction -Execute $powerShell -Argument "-NoProf
 $watcherTrigger = New-ScheduledTaskTrigger -AtLogOn
 $watcherPrincipal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-4' -RunLevel Limited
 $watcherSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel -StartWhenAvailable
-Register-ScheduledTask -TaskName $watcherTaskName -Action $watcherAction -Trigger $watcherTrigger -Principal $watcherPrincipal -Settings $watcherSettings -Description 'Registra login, bloqueio, desbloqueio e logoff da sessão interativa.' -Force | Out-Null
+Register-ScheduledTask -TaskName $watcherTaskName -Action $watcherAction -Trigger $watcherTrigger -Principal $watcherPrincipal -Settings $watcherSettings -Description 'Mantém o contexto local da sessão para associar ocorrências suspeitas ao usuário.' -Force | Out-Null
 
 Start-ScheduledTask -TaskName $agentTaskName
 Write-Host "IFMS LabMonitor instalado em $InstallPath"

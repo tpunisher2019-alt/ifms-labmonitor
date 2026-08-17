@@ -1,0 +1,35 @@
+IFMS LabMonitor - Agente para Windows 2.3.0
+
+Este pacote solicita a conexão do computador ao painel do IFMS LabMonitor.
+
+COMO INSTALAR OU ATUALIZAR
+
+1. Extraia todo o conteúdo do arquivo ZIP para uma pasta.
+2. Clique com o botão direito em install.bat e escolha "Executar como administrador".
+3. Aceite a solicitação de permissão do Windows.
+4. Aguarde a mensagem "IFMS LabMonitor instalado".
+5. Saia e entre novamente na conta do Windows, ou reinicie o computador.
+6. Em uma instalação nova, abra "Solicitações" no painel, confira MAC, IP e nome da máquina e autorize o computador.
+7. Aguarde a próxima comunicação; a máquina aparecerá em "Computadores".
+
+COMPORTAMENTO DESTA VERSÃO
+
+- O agente informa que está online a cada 20 minutos.
+- Aplicativos proibidos ou suspeitos geram ocorrência imediata.
+- Login, logoff, bloqueio e desbloqueio permanecem apenas na própria máquina.
+- O inventário de programas só é coletado quando o administrador solicita pelo painel.
+- Atualizar pelo instalador encerra o agente antigo antes de iniciar a nova versão.
+
+IMPORTANTE
+
+- O mesmo pacote pode ser instalado em vários computadores.
+- Cada máquina gera uma solicitação e uma credencial própria.
+- Alterar o nome do Windows atualiza o mesmo cadastro, sem criar duplicata.
+- Após formatação, o painel pode reconhecer o hardware e preservar o histórico mediante nova autorização.
+- MAC, IP e nome servem para conferência; a credencial real é gerada de forma aleatória por cada agente.
+- O agente não captura tela e não registra teclas digitadas.
+- Os arquivos ficam normalmente em C:\ProgramData\IFMS\LabMonitor.
+
+DESINSTALAÇÃO
+
+Execute uninstall.bat como administrador. Os dados locais são preservados por padrão.

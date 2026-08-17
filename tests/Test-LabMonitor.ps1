@@ -23,7 +23,8 @@ Assert-True (-not [bool]$policy.foreground.enabled) 'Foreground deve vir desabil
 Assert-True (-not [bool]$network.enabled) 'Rede deve vir desabilitada até receber credenciais.'
 Assert-True (-not $network.PSObject.Properties['secretKey']) 'A configuração da estação não pode conter chave secreta do Supabase.'
 Assert-True (-not $network.PSObject.Properties['enrollmentToken']) 'O agente não deve depender de token de matrícula compartilhado.'
-Assert-True ([int]$network.syncIntervalSeconds -ge 300) 'Intervalo padrão deve respeitar o orçamento do plano gratuito.'
+Assert-True ([int]$network.syncIntervalSeconds -ge 1200) 'Intervalo padrão deve suportar 150 máquinas no orçamento do plano gratuito.'
+Assert-True (-not $network.PSObject.Properties['inventoryIntervalHours']) 'Inventário não pode ser coletado periodicamente.'
 
 Write-Host '3/6 Testando JSON Lines e fila persistente...'
 . (Join-Path $projectRoot 'src\Common.ps1')
@@ -54,12 +55,19 @@ try{
     New-Item -ItemType Directory -Path (Join-Path $testRoot 'agent\data\inbox') -Force|Out-Null
     Copy-Item (Join-Path $projectRoot 'config\policy.json') (Join-Path $testRoot 'agent\config\policy.json')
     Copy-Item (Join-Path $projectRoot 'VERSION') (Join-Path $testRoot 'agent\VERSION')
+    $testPolicy=Get-Content -LiteralPath (Join-Path $testRoot 'agent\config\policy.json') -Raw -Encoding UTF8|ConvertFrom-Json
+    $testPolicy.rules+=@([pscustomobject]@{id='test-powershell';displayName='PowerShell de teste';enabled=$true;severity='test';match=[pscustomobject]@{processNames=@('powershell.exe');pathRegex=$null}})
+    [IO.File]::WriteAllText((Join-Path $testRoot 'agent\config\policy.json'),($testPolicy|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))
     $sessionKey=New-LmSessionKey $env:COMPUTERNAME 999 'IFMS\aluno.teste' 'test-login'
     Write-LmInboxEvent (Join-Path $testRoot 'agent\data\inbox') ([ordered]@{schemaVersion=1;eventId=[Guid]::NewGuid();timestampUtc=Get-LmUtcNow;type='Login';hostname=$env:COMPUTERNAME;user='IFMS\aluno.teste';sessionId=999;sessionKey=$sessionKey;component='test'})
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectRoot 'src\Agent.ps1') -RootPath (Join-Path $testRoot 'agent') -Once
     Assert-True ($LASTEXITCODE -eq 0) "O agente terminou com código $LASTEXITCODE."
     $events=@(Get-Content (Join-Path $testRoot 'agent\data\logs\events.jsonl')|ForEach-Object{$_|ConvertFrom-Json})
-    Assert-True (@($events|Where-Object{$_.type -eq 'SessionStarted'}).Count -eq 1) 'Login não gerou uma sessão exatamente uma vez.'
+    Assert-True (@($events|Where-Object{$_.type -match '^Session|^Watcher|^Console'}).Count -eq 0) 'Eventos comuns de sessão não podem ser enviados ou registrados como ocorrência.'
+    Assert-True (@($events|Where-Object{$_.type -eq 'ProhibitedApplicationDetected'}).Count -ge 1) 'Processo proibido não gerou ocorrência.'
+    $agentSource=Get-Content -LiteralPath (Join-Path $projectRoot 'src\Agent.ps1') -Raw -Encoding UTF8
+    Assert-True ($agentSource -notmatch 'Update-SoftwareInventoryIfDue') 'Inventário periódico ainda está presente no agente.'
+    Assert-True ($agentSource -match "'inventory_refresh'\s*\{[\s\S]*Collect-SoftwareInventoryOnRequest") 'Inventário sob demanda não está ligado à tarefa remota.'
 
     Write-Host '6/6 Criando e validando um pacote de atualização...'
     $releaseDirectory=Join-Path $testRoot 'releases'

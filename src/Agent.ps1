@@ -70,7 +70,13 @@ function Write-MonitorEvent {
     Write-LmJsonLine -Path $paths.Events -Value $entry
     if ($null -ne $script:networkConfig -and [bool]$script:networkConfig.enabled) {
         Add-LmOutboxItem -RootPath $RootPath -Kind 'event' -Payload $entry
+        $script:syncRequested = $true
     }
+}
+
+function Test-ReportableEventType {
+    param([string]$Type)
+    return $Type -in @('ProhibitedApplicationDetected', 'ProhibitedApplicationStopped', 'SuspiciousApplicationDetected', 'SuspiciousApplicationStopped')
 }
 
 function New-AgentState {
@@ -109,7 +115,9 @@ function Initialize-NetworkBackfill {
         foreach ($line in @(Get-Content -LiteralPath $paths.Events -Encoding UTF8)) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             try {
-                Add-LmOutboxItem -RootPath $RootPath -Kind 'event' -Payload ($line | ConvertFrom-Json)
+                $historicalEvent = $line | ConvertFrom-Json
+                if (-not (Test-ReportableEventType -Type ([string]$historicalEvent.type))) { continue }
+                Add-LmOutboxItem -RootPath $RootPath -Kind 'event' -Payload $historicalEvent
                 $queued++
             } catch { }
         }
@@ -118,27 +126,36 @@ function Initialize-NetworkBackfill {
     Write-AgentDiagnostic 'information' 'Histórico local preparado para sincronização inicial.' @{ queuedEvents = $queued }
 }
 
-function Get-AgentVersion {
-    if (Test-Path -LiteralPath $paths.Version) { return (Get-Content -LiteralPath $paths.Version -Raw).Trim() }
-    return '2.2.0'
+function Remove-NonReportableOutboxEvents {
+    $outboxPath = Join-Path $RootPath 'data\outbox'
+    $removed = 0
+    foreach ($file in @(Get-ChildItem -LiteralPath $outboxPath -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        try {
+            $item = Read-LmJsonFile -Path $file.FullName
+            if ($null -ne $item -and [string]$item.kind -eq 'event' -and
+                -not (Test-ReportableEventType -Type ([string]$item.payload.type))) {
+                Remove-Item -LiteralPath $file.FullName -Force
+                $removed++
+            }
+        } catch { }
+    }
+    if ($removed -gt 0) {
+        Write-AgentDiagnostic 'information' 'Eventos comuns de sessão removidos da fila de envio.' @{ removedEvents = $removed }
+    }
 }
 
-function Update-SoftwareInventoryIfDue {
-    param($NetworkConfig)
-    $hours = if ($NetworkConfig.inventoryIntervalHours) { [Math]::Max(1, [int]$NetworkConfig.inventoryIntervalHours) } else { 6 }
-    $due = -not $state.lastInventoryAtUtc
-    if (-not $due) {
-        try { $due = ([DateTime]::UtcNow - [DateTime]::Parse([string]$state.lastInventoryAtUtc).ToUniversalTime()).TotalHours -ge $hours }
-        catch { $due = $true }
-    }
-    if (-not $due) { return }
+function Get-AgentVersion {
+    if (Test-Path -LiteralPath $paths.Version) { return (Get-Content -LiteralPath $paths.Version -Raw).Trim() }
+    return '2.3.0'
+}
+
+function Collect-SoftwareInventoryOnRequest {
     $snapshot = Save-LmInventorySnapshot -Path $paths.Inventory
     $state.lastInventoryAtUtc = $snapshot.collectedAtUtc
-    if ([string]$state.lastInventoryHash -ne [string]$snapshot.inventoryHash) {
-        $state.lastInventoryHash = [string]$snapshot.inventoryHash
-        [IO.File]::WriteAllText((Join-Path $RootPath 'data\state\inventory-pending.flag'), 'pending')
-        Write-AgentDiagnostic 'information' 'Inventário de softwares atualizado.' @{ count = @($snapshot.software).Count; hash = $snapshot.inventoryHash }
-    }
+    $state.lastInventoryHash = [string]$snapshot.inventoryHash
+    [IO.File]::WriteAllText((Join-Path $RootPath 'data\state\inventory-pending.flag'), 'pending')
+    Write-AgentDiagnostic 'information' 'Inventário coletado por solicitação administrativa.' @{ count = @($snapshot.software).Count; hash = $snapshot.inventoryHash }
+    return $snapshot
 }
 
 function Queue-PendingUpdateResults {
@@ -198,10 +215,11 @@ function Process-RemoteJobs {
             switch ([string]$job.type) {
                 'agent_update' { Start-LmRemoteUpdate -Job $job -NetworkConfig $NetworkConfig -AgentVersion $AgentVersion }
                 'inventory_refresh' {
-                    $state.lastInventoryAtUtc = $null
+                    $snapshot = Collect-SoftwareInventoryOnRequest
                     Add-LmOutboxItem -RootPath $RootPath -Kind 'job_result' -Payload @{
-                        jobId = $id; status = 'succeeded'; message = 'Inventário agendado para o próximo ciclo.'; timestampUtc = Get-LmUtcNow
+                        jobId = $id; status = 'succeeded'; message = ('Inventário coletado: {0} programas.' -f @($snapshot.software).Count); timestampUtc = Get-LmUtcNow
                     }
+                    $script:syncRequested = $true
                 }
                 default { throw "Tipo de tarefa não permitido pelo agente: $($job.type)" }
             }
@@ -241,7 +259,6 @@ function New-SessionRecord {
         occurrences = @{}
     }
     $script:state.sessions[$Key] = $record
-    Write-MonitorEvent -Type 'SessionStarted' -Session $record -TimestampUtc $StartedAtUtc -Data @{ source = $Source }
     return $record
 }
 
@@ -270,7 +287,6 @@ function Close-Session {
     $Session.state = 'loggedOff'
     $Session.endedAtUtc = $TimestampUtc
     $Session.lastEventAtUtc = $TimestampUtc
-    Write-MonitorEvent -Type 'SessionEnded' -Session $Session -TimestampUtc $TimestampUtc -Data @{ reason = $Reason }
     Write-LmJsonLine -Path $paths.Sessions -Value ([ordered]@{
         schemaVersion = 1
         sessionKey = $Session.sessionKey
@@ -301,12 +317,12 @@ function Process-Inbox {
             $session.lastEventAtUtc = [string]$event.timestampUtc
             switch ([string]$event.type) {
                 'Login' { $session.state = 'active' }
-                'WatcherStarted' { Write-MonitorEvent 'WatcherStarted' $session $null ([string]$event.timestampUtc) }
-                'Lock' { $session.state = 'locked'; Write-MonitorEvent 'SessionLocked' $session $null ([string]$event.timestampUtc) }
-                'Unlock' { $session.state = 'active'; Write-MonitorEvent 'SessionUnlocked' $session $null ([string]$event.timestampUtc) }
+                'WatcherStarted' { $session.state = 'active' }
+                'Lock' { $session.state = 'locked' }
+                'Unlock' { $session.state = 'active' }
                 'Logoff' { Close-Session $session ([string]$event.timestampUtc) 'interactive-logoff' }
-                'ConsoleConnect' { Write-MonitorEvent 'ConsoleConnected' $session $null ([string]$event.timestampUtc) }
-                'ConsoleDisconnect' { Write-MonitorEvent 'ConsoleDisconnected' $session $null ([string]$event.timestampUtc) }
+                'ConsoleConnect' { $session.state = 'active' }
+                'ConsoleDisconnect' { $session.state = 'disconnected' }
                 default { Write-AgentDiagnostic 'warning' 'Tipo de evento de sessão desconhecido.' @{ type = $event.type } }
             }
             Remove-Item -LiteralPath $file.FullName -Force
@@ -418,6 +434,8 @@ foreach ($directory in @($paths.Inbox, (Split-Path $paths.State -Parent), (Split
 $script:state = Import-AgentState
 $script:networkConfig = $null
 $script:exitRequested = $false
+$script:syncRequested = $false
+$script:privacyCleanupCompleted = $false
 $agentVersion = Get-AgentVersion
 $lastHeartbeat = [DateTime]::MinValue
 Write-AgentDiagnostic 'information' 'Agente iniciado.' @{ version = $agentVersion; pid = $PID; rootPath = $RootPath }
@@ -428,14 +446,19 @@ do {
         if ($null -eq $policy -or $policy.schemaVersion -ne 1) { throw "Política ausente ou inválida: $($paths.Policy)" }
         $effectivePoll = if ($PollSeconds -gt 0) { $PollSeconds } else { [Math]::Max(2, [int]$policy.pollIntervalSeconds) }
         $script:networkConfig = Read-LmJsonFile -Path $paths.Network
-        if ($null -ne $networkConfig -and [bool]$networkConfig.enabled) { Initialize-NetworkBackfill }
+        if ($null -ne $networkConfig -and [bool]$networkConfig.enabled) {
+            if (-not $script:privacyCleanupCompleted) {
+                Remove-NonReportableOutboxEvents
+                $script:privacyCleanupCompleted = $true
+            }
+            Initialize-NetworkBackfill
+        }
         Process-Inbox
         Poll-ProhibitedProcesses -Policy $policy
         if ($null -ne $networkConfig -and [bool]$networkConfig.enabled) {
-            Update-SoftwareInventoryIfDue -NetworkConfig $networkConfig
             Queue-PendingUpdateResults
-            $syncSeconds = if ($networkConfig.syncIntervalSeconds) { [Math]::Max(15, [int]$networkConfig.syncIntervalSeconds) } else { 60 }
-            $syncDue = -not $state.lastSyncAtUtc
+            $syncSeconds = if ($networkConfig.syncIntervalSeconds) { [Math]::Max(1200, [int]$networkConfig.syncIntervalSeconds) } else { 1200 }
+            $syncDue = $script:syncRequested -or -not $state.lastSyncAtUtc
             if (-not $syncDue) {
                 try { $syncDue = ([DateTime]::UtcNow - [DateTime]::Parse([string]$state.lastSyncAtUtc).ToUniversalTime()).TotalSeconds -ge $syncSeconds }
                 catch { $syncDue = $true }
@@ -444,7 +467,13 @@ do {
                 try {
                     $sync = Invoke-LmNetworkSync -RootPath $RootPath -NetworkConfig $networkConfig -AgentVersion $agentVersion -InventoryPath $paths.Inventory
                     $state.lastSyncAtUtc = Get-LmUtcNow
+                    $script:syncRequested = $false
                     Process-RemoteJobs -Jobs $sync.jobs -NetworkConfig $networkConfig -AgentVersion $agentVersion
+                    if ($script:syncRequested -and -not $script:exitRequested) {
+                        $null = Invoke-LmNetworkSync -RootPath $RootPath -NetworkConfig $networkConfig -AgentVersion $agentVersion -InventoryPath $paths.Inventory
+                        $state.lastSyncAtUtc = Get-LmUtcNow
+                        $script:syncRequested = $false
+                    }
                 }
                 catch {
                     Write-AgentDiagnostic 'warning' 'Sincronização com o servidor indisponível; os dados permanecerão na fila local.' @{ error = $_.Exception.Message }

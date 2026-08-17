@@ -5,7 +5,7 @@ Plataforma para monitorar sessões Windows em laboratórios, detectar aplicativo
 ## O que está implementado
 
 - agente PowerShell iniciado como `SYSTEM` no boot;
-- observador interativo para login, logoff, bloqueio e desbloqueio;
+- contexto local de login, logoff, bloqueio e desbloqueio, sem enviar esses eventos ao servidor;
 - identificação de hostname, usuário Windows/GCPW visível no Windows e Session ID;
 - detecção local de Roblox, Minecraft e X-VPN;
 - agrupamento por sessão com primeira/última detecção e contagem de execuções;
@@ -72,7 +72,9 @@ Nunca coloque a chave secreta ou `service_role` nas estações. Elas recebem ape
 
 ## Inventário
 
-O inventário é coletado a cada seis horas por padrão. Ele lê as áreas de desinstalação de 64 bits, 32 bits e dos perfis de usuário carregados, sem utilizar `Win32_Product` — que pode ser lento e disparar reparos MSI.
+O inventário só é coletado quando um administrador solicita a atualização pelo painel. Ele lê as áreas de desinstalação de 64 bits, 32 bits e dos perfis de usuário carregados, sem utilizar `Win32_Product` — que pode ser lento e disparar reparos MSI.
+
+Em operação normal, o agente envia apenas uma comunicação de estado a cada 20 minutos. Ocorrências de aplicativos proibidos ou suspeitos são enviadas imediatamente; os demais dados de sessão permanecem somente na máquina.
 
 O servidor recebe nome, versão, fabricante, data, arquitetura, escopo e ProductCode quando existente. Programas removidos deixam de aparecer após um inventário confirmado.
 
@@ -87,7 +89,7 @@ O painel não envia comandos PowerShell arbitrários. Ele cria somente tarefas p
 Crie o pacote:
 
 ```powershell
-.\tools\New-AgentRelease.ps1 -Version 2.2.0 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
+.\tools\New-AgentRelease.ps1 -Version 2.3.0 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
 ```
 
 Depois, envie o ZIP ao bucket privado `agent-releases` e cadastre versão, caminho e SHA-256 em `agent_releases`. O painel poderá direcionar essa versão para máquinas selecionadas.

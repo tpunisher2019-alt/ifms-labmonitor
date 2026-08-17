@@ -14,7 +14,7 @@ const demo: DashboardData = {
   ],
   events:[
     {event_id:"e1",occurred_at:new Date(Date.now()-180000).toISOString(),event_type:"ProhibitedApplicationDetected",user_name:"IFMS\\ana.silva",payload:{displayName:"Roblox"},devices:{hostname:"LAB01-PC07"}},
-    {event_id:"e2",occurred_at:new Date(Date.now()-720000).toISOString(),event_type:"SessionLocked",user_name:"IFMS\\aluno.teste",payload:{},devices:{hostname:"LAB01-PC01"}},
+    {event_id:"e2",occurred_at:new Date(Date.now()-720000).toISOString(),event_type:"SuspiciousApplicationDetected",user_name:"IFMS\\aluno.teste",payload:{processName:"programa-desconhecido.exe"},devices:{hostname:"LAB01-PC01"}},
   ],
   releases:[{id:"r1",version:"2.0.0",active:true,created_at:new Date().toISOString()}], softwareTotal:130,
   software:[
