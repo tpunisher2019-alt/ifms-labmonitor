@@ -19,6 +19,11 @@ Deno.serve(async(request)=>{
     const response=await fetch(`${url}/rest/v1/profiles?select=id,email,full_name,role,active,created_at&order=active.desc,role.asc,full_name.asc`,{headers:baseHeaders});
     return reply({users:await response.json()},response.ok?200:502);
   }
+  if(body.action==="metrics"){
+    const response=await fetch(`${url}/rest/v1/rpc/get_admin_storage_metrics`,{method:"POST",headers:baseHeaders,body:"{}"});
+    const metrics=await response.json().catch(()=>null);
+    return reply({metrics},response.ok?200:502);
+  }
   if(body.action==="create"){
     const email=String(body.email||"").trim().toLowerCase(),fullName=String(body.fullName||"").trim(),password=String(body.password||""),role=body.role==="admin"?"admin":body.role==="monitor"?"monitor":"";
     if(!/^[^\s@]+@ifms\.edu\.br$/i.test(email)||fullName.length<3||password.length<7||!role)return reply({error:"invalid_input"},400);
@@ -36,6 +41,22 @@ Deno.serve(async(request)=>{
     if(changes.active===false)await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(body.userId)}`,{method:"PUT",headers:baseHeaders,body:JSON.stringify({ban_duration:"876000h"})});
     if(changes.active===true)await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(body.userId)}`,{method:"PUT",headers:baseHeaders,body:JSON.stringify({ban_duration:"none"})});
     return reply({ok:response.ok},response.ok?200:502);
+  }
+  if(body.action==="delete"){
+    const userId=String(body.userId||"");
+    if(!userId||userId===caller.id)return reply({error:"protected_user"},400);
+    const targetResponse=await fetch(`${url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,email,role,active`,{headers:baseHeaders});
+    const [target]=await targetResponse.json();
+    if(!target)return reply({error:"user_not_found"},404);
+    if(target.role==="admin"&&target.active){
+      const adminsResponse=await fetch(`${url}/rest/v1/profiles?role=eq.admin&active=eq.true&select=id`,{headers:baseHeaders});
+      const admins=await adminsResponse.json();
+      if(!adminsResponse.ok||admins.length<=1)return reply({error:"last_admin"},400);
+    }
+    await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(userId)}`,{method:"PUT",headers:baseHeaders,body:JSON.stringify({ban_duration:"876000h"})});
+    const response=await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(userId)}`,{method:"DELETE",headers:baseHeaders});
+    const detail=response.ok?null:await response.json().catch(()=>null);
+    return reply({ok:response.ok,detail},response.ok?200:502);
   }
   return reply({error:"unknown_action"},400);
 });

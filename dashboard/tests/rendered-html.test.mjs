@@ -29,3 +29,31 @@ test("aceita senha temporária baseada em SIAPE com 7 caracteres", async () => {
   assert.match(page, /id="user-password"[^>]+minlength="7"/);
   assert.match(edgeFunction, /password\.length<7/);
 });
+
+test("separa inventário de atualizações e permite escolher computadores", async () => {
+  const page = await readFile(new URL("../github-pages/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../github-pages/app.js", import.meta.url), "utf8");
+
+  assert.match(page, /id="update-device-rows"/);
+  assert.match(page, /id="inventory-job-rows"/);
+  assert.match(page, /id="update-job-rows"/);
+  assert.match(page, />Aplicar atualização</);
+  assert.match(app, /job\.jobs\?\.type === "inventory_refresh"/);
+  assert.match(app, /job\.jobs\?\.type === "agent_update"/);
+});
+
+test("oferece remoção protegida de usuários e métricas de armazenamento", async () => {
+  const page = await readFile(new URL("../github-pages/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../github-pages/app.js", import.meta.url), "utf8");
+  const edgeFunction = await readFile(new URL("../../supabase/functions/admin-users/index.ts", import.meta.url), "utf8");
+  const migrations = await readFile(new URL("../../supabase/migrations/20260817183313_admin_storage_metrics.sql", import.meta.url), "utf8");
+
+  assert.match(page, /data-view="storage"/);
+  assert.match(app, /adminFunction\("metrics"\)/);
+  assert.match(app, /window\.confirm/);
+  assert.match(edgeFunction, /body\.action==="delete"/);
+  assert.match(edgeFunction, /admins\.length<=1/);
+  assert.match(migrations, /revoke all on function public\.get_admin_storage_metrics\(\) from public/);
+  assert.match(migrations, /security invoker/);
+  assert.match(migrations, /grant execute on function public\.get_admin_storage_metrics\(\) to service_role/);
+});
