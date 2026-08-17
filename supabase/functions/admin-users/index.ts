@@ -15,14 +15,34 @@ Deno.serve(async(request)=>{
   const [profile]=await profileResponse.json();
   if(!profile?.active||profile.role!=="admin")return reply({error:"admin_required"},403);
   const body=await request.json().catch(()=>({}));
+  const cleanupReleases=async()=>{
+    const releasesResponse=await fetch(`${url}/rest/v1/agent_releases?select=id,version,storage_path&order=created_at.desc,id.desc`,{headers:baseHeaders});
+    const releases=await releasesResponse.json().catch(()=>[]);
+    if(!releasesResponse.ok)return {ok:false,error:"release_list_failed",removed:[]};
+    const retained=releases.slice(0,2);
+    if(retained.length){
+      const retainedIds=retained.map((release:{id:string})=>release.id).join(",");
+      const activateResponse=await fetch(`${url}/rest/v1/agent_releases?id=in.(${encodeURIComponent(retainedIds)})`,{method:"PATCH",headers:{...baseHeaders,Prefer:"return=minimal"},body:JSON.stringify({active:true})});
+      if(!activateResponse.ok)return {ok:false,error:"release_activation_failed",removed:[]};
+    }
+    const obsolete=releases.slice(2);
+    if(!obsolete.length)return {ok:true,removed:[]};
+    const storageResponse=await fetch(`${url}/storage/v1/object/agent-releases`,{method:"DELETE",headers:baseHeaders,body:JSON.stringify({prefixes:obsolete.map((release:{storage_path:string})=>release.storage_path)})});
+    if(!storageResponse.ok)return {ok:false,error:"storage_cleanup_failed",removed:[]};
+    const ids=obsolete.map((release:{id:string})=>release.id).join(",");
+    const databaseResponse=await fetch(`${url}/rest/v1/agent_releases?id=in.(${encodeURIComponent(ids)})`,{method:"DELETE",headers:{...baseHeaders,Prefer:"return=minimal"}});
+    return {ok:databaseResponse.ok,error:databaseResponse.ok?null:"release_cleanup_failed",removed:databaseResponse.ok?obsolete.map((release:{version:string})=>release.version):[]};
+  };
   if(body.action==="list"){
     const response=await fetch(`${url}/rest/v1/profiles?select=id,email,full_name,role,active,created_at&order=active.desc,role.asc,full_name.asc`,{headers:baseHeaders});
     return reply({users:await response.json()},response.ok?200:502);
   }
   if(body.action==="metrics"){
+    const retention=await cleanupReleases();
+    if(!retention.ok)return reply({error:retention.error},502);
     const response=await fetch(`${url}/rest/v1/rpc/get_admin_storage_metrics`,{method:"POST",headers:baseHeaders,body:"{}"});
     const metrics=await response.json().catch(()=>null);
-    return reply({metrics},response.ok?200:502);
+    return reply({metrics,releaseRetention:retention},response.ok?200:502);
   }
   if(body.action==="create"){
     const email=String(body.email||"").trim().toLowerCase(),fullName=String(body.fullName||"").trim(),password=String(body.password||""),role=body.role==="admin"?"admin":body.role==="monitor"?"monitor":"";
