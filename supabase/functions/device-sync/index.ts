@@ -268,6 +268,9 @@ Deno.serve(async (request) => {
     const leaseCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     await db.from("device_jobs").update({ status: "pending", leased_at: null })
       .eq("device_id", deviceId).eq("status", "leased").lt("leased_at", leaseCutoff);
+    const { data: settings } = await db.from("system_settings")
+      .select("remote_updates_enabled").eq("id", true).maybeSingle();
+    const remoteUpdatesEnabled = settings?.remote_updates_enabled === true;
     const { data: targets } = await db.from("device_jobs")
       .select("job_id,jobs!inner(id,type,payload,expires_at,cancelled_at)")
       .eq("device_id", deviceId).eq("status", "pending").limit(10);
@@ -275,6 +278,7 @@ Deno.serve(async (request) => {
     for (const target of targets ?? []) {
       const job = target.jobs as unknown as { id: string; type: string; payload: Record<string, unknown>; expires_at?: string; cancelled_at?: string };
       if (job.cancelled_at || (job.expires_at && new Date(job.expires_at) <= new Date())) continue;
+      if (job.type === "agent_update" && !remoteUpdatesEnabled) continue;
       const payload = { ...(job.payload ?? {}) };
       if (job.type === "agent_update" && payload.releaseId) {
         const { data: release } = await db.from("agent_releases").select("version,storage_path,sha256,active")

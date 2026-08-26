@@ -90,14 +90,14 @@ O painel não envia comandos PowerShell arbitrários. Ele cria somente tarefas p
 Crie o pacote:
 
 ```powershell
-.\tools\New-AgentRelease.ps1 -Version 2.3.1 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
+.\tools\New-AgentRelease.ps1 -Version 2.3.2
 ```
 
 Depois, envie o ZIP ao bucket privado `agent-releases` e cadastre versão, caminho e SHA-256 em `agent_releases`. O painel poderá direcionar essa versão para máquinas selecionadas.
 
-O agente baixa por BITS quando disponível, confere o hash, valida todos os arquivos do manifesto, verifica assinatura digital e mantém backup para recuperação. Política e credenciais locais não são substituídas por uma atualização do agente.
+O agente baixa por BITS quando disponível, confere o hash, valida todos os arquivos do manifesto e mantém backup para recuperação. Política e credenciais locais não são substituídas por uma atualização do agente. O administrador pode habilitar ou desabilitar globalmente a entrega de atualizações na própria aba **Atualizações**.
 
-Para um piloto com scripts ainda não assinados, `requireAuthenticode` pode ser temporariamente desativado em `network.json`. Não use essa configuração em produção.
+O modo interno usa o bucket privado, o login administrativo e SHA-256 sem exigir certificado. Se futuramente houver um certificado institucional, ative `requireAuthenticode` e cadastre os assinantes autorizados em `trustedSignerThumbprints` para aumentar a proteção.
 
 ## Testes
 

@@ -74,6 +74,19 @@ if (-not (Test-Path -LiteralPath $installedNetworkConfig)) {
     if ($currentNetwork.PSObject.Properties['inventoryIntervalHours']) {
         $currentNetwork.PSObject.Properties.Remove('inventoryIntervalHours')
     }
+    if (-not $currentNetwork.PSObject.Properties['updates']) {
+        $currentNetwork | Add-Member -NotePropertyName updates -NotePropertyValue ([pscustomobject]@{})
+    }
+    if ($currentNetwork.updates.PSObject.Properties['enabled']) {
+        $currentNetwork.updates.enabled = [bool]$newDefaults.updates.enabled
+    } else {
+        $currentNetwork.updates | Add-Member -NotePropertyName enabled -NotePropertyValue ([bool]$newDefaults.updates.enabled)
+    }
+    if ($currentNetwork.updates.PSObject.Properties['requireAuthenticode']) {
+        $currentNetwork.updates.requireAuthenticode = [bool]$newDefaults.updates.requireAuthenticode
+    } else {
+        $currentNetwork.updates | Add-Member -NotePropertyName requireAuthenticode -NotePropertyValue ([bool]$newDefaults.updates.requireAuthenticode)
+    }
     $temporaryNetwork = $installedNetworkConfig + '.new'
     [IO.File]::WriteAllText($temporaryNetwork, ($currentNetwork | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
     Move-Item -LiteralPath $temporaryNetwork -Destination $installedNetworkConfig -Force

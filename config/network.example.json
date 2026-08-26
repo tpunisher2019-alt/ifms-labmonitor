@@ -8,8 +8,8 @@
   "batchSize": 100,
   "requestTimeoutSeconds": 30,
   "updates": {
-    "enabled": false,
-    "requireAuthenticode": true,
+    "enabled": true,
+    "requireAuthenticode": false,
     "trustedSignerThumbprints": []
   }
 }

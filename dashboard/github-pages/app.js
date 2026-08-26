@@ -4,7 +4,7 @@ const config = window.LABMONITOR_CONFIG || {};
 const configured = /^https:\/\/.+\.supabase\.co$/.test(config.supabaseUrl || "") && !String(config.publishableKey || "").includes("SUBSTITUA");
 const supabase = configured ? createClient(config.supabaseUrl, config.publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 const $ = (id) => document.getElementById(id);
-const state = { profile: null, devices: [], events: [], software: [], releases: [], jobs: [], requests: [], storageMetrics: null, selected: new Set(), selectedRequests: new Set(), retentionDays: 90 };
+const state = { profile: null, devices: [], events: [], software: [], releases: [], jobs: [], requests: [], storageMetrics: null, selected: new Set(), selectedRequests: new Set(), retentionDays: 90, remoteUpdatesEnabled: true };
 const eventLabels = { ProhibitedApplicationDetected: "Aplicativo proibido detectado", ProhibitedApplicationStopped: "Aplicativo proibido encerrado", SuspiciousApplicationDetected: "Aplicativo suspeito detectado", SuspiciousApplicationStopped: "Aplicativo suspeito encerrado", WallpaperChanged: "Papel de parede alterado" };
 const esc = (value) => String(value ?? "—").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const eventName = (value) => eventLabels[value] || value;
@@ -45,7 +45,7 @@ async function loadData() {
     supabase.from("software_inventory").select("device_id,inventory_key,name,version,publisher,scope,architecture,devices(hostname)").order("name").limit(5000),
     supabase.from("agent_releases").select("id,version,active,created_at").order("created_at", { ascending: false }),
     supabase.from("device_jobs").select("job_id,status,leased_at,completed_at,result,devices(hostname),jobs(type,created_at)").order("leased_at", { ascending: false, nullsFirst: false }).limit(100),
-    supabase.from("system_settings").select("event_retention_days").eq("id", true).maybeSingle(),
+    supabase.from("system_settings").select("event_retention_days,remote_updates_enabled").eq("id", true).maybeSingle(),
     supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at,matched_device_id,match_score,match_reasons").order("last_requested_at", { ascending: false }).limit(200),
     storageMetricsRequest
   ]);
@@ -53,6 +53,7 @@ async function loadData() {
   if (failed) { message("Não foi possível carregar os dados. Verifique a configuração do Supabase.", true); return; }
   [state.devices, state.events, state.software, state.releases, state.jobs] = results.slice(0, 5).map((item) => item.data || []);
   state.retentionDays = results[5].data?.event_retention_days || 90;
+  state.remoteUpdatesEnabled = results[5].data?.remote_updates_enabled === true;
   state.requests = results[6].data || [];
   state.storageMetrics = results[7].data || null;
   render();
@@ -70,6 +71,9 @@ function render() {
   $("software-device").innerHTML = '<option value="">Todos os computadores</option>' + state.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.hostname)}</option>`).join("");
   $("inventory-count").textContent = `${state.software.length} instalações`; renderSoftware();
   $("release-select").innerHTML = '<option value="">Selecione uma versão</option>' + state.releases.filter((r) => r.active).map((r) => `<option value="${esc(r.id)}">Versão ${esc(r.version)}</option>`).join("");
+  $("remote-update-status").textContent = state.remoteUpdatesEnabled ? "Atualizações habilitadas" : "Atualizações desabilitadas";
+  $("remote-update-status").className = `badge ${state.remoteUpdatesEnabled ? "active" : "inactive"}`;
+  $("toggle-remote-updates").textContent = state.remoteUpdatesEnabled ? "Desabilitar atualizações" : "Habilitar atualizações";
   $("update-device-rows").innerHTML = state.devices.map((d) => `<tr><td><input class="device-check" type="checkbox" aria-label="Selecionar ${esc(d.hostname)} para atualização" data-device="${esc(d.id)}" ${state.selected.has(d.id) ? "checked" : ""}></td><td><b>${esc(d.hostname)}</b></td><td>v${esc(d.agent_version)}</td><td><span class="status ${isOnline(d) ? "online" : ""}"><i></i>${isOnline(d) ? "Online" : "Offline"}</span></td><td>${ago(d.last_seen_at)}</td></tr>`).join("") || emptyRow(5, "Nenhum computador cadastrado.");
   renderJobHistory();
   renderStorageMetrics();
@@ -138,12 +142,12 @@ async function decideRequests(status) {
 }
 
 function renderSoftware() { const query = $("software-search").value.trim().toLowerCase(); const device = $("software-device").value; const rows = state.software.filter((s) => (!device || s.device_id === device) && (!query || s.name.toLowerCase().includes(query) || (s.publisher || "").toLowerCase().includes(query))); $("software-rows").innerHTML = rows.map((s) => `<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.version)}</td><td>${esc(s.publisher)}</td><td>${esc(s.devices?.hostname)}</td><td>${esc(s.scope)}</td><td>${esc(s.architecture)}</td></tr>`).join("") || emptyRow(6, "Nenhum software encontrado."); }
-function bindDeviceChecks() { document.querySelectorAll(".device-check").forEach((box) => box.addEventListener("change", () => { box.checked ? state.selected.add(box.dataset.device) : state.selected.delete(box.dataset.device); document.querySelectorAll(`.device-check[data-device="${CSS.escape(box.dataset.device)}"]`).forEach((peer) => { peer.checked = box.checked; }); $("inventory-refresh").disabled = !state.selected.size; $("send-update").disabled = !state.selected.size || !$("release-select").value; })); $("inventory-refresh").disabled = !state.selected.size; $("send-update").disabled = !state.selected.size || !$("release-select").value; }
+function bindDeviceChecks() { document.querySelectorAll(".device-check").forEach((box) => box.addEventListener("change", () => { box.checked ? state.selected.add(box.dataset.device) : state.selected.delete(box.dataset.device); document.querySelectorAll(`.device-check[data-device="${CSS.escape(box.dataset.device)}"]`).forEach((peer) => { peer.checked = box.checked; }); $("inventory-refresh").disabled = !state.selected.size; $("send-update").disabled = !state.remoteUpdatesEnabled || !state.selected.size || !$("release-select").value; })); $("inventory-refresh").disabled = !state.selected.size; $("send-update").disabled = !state.remoteUpdatesEnabled || !state.selected.size || !$("release-select").value; }
 
 async function createJob(type, releaseId) {
   if (!state.selected.size) return;
   const { error } = await supabase.rpc("create_device_job", { job_type: type, device_ids: [...state.selected], release_id: releaseId || null });
-  if (error) return message("Não foi possível criar a tarefa.", true);
+  if (error) return message(type === "agent_update" && !state.remoteUpdatesEnabled ? "Habilite as atualizações remotas antes de enviar." : "Não foi possível criar a tarefa.", true);
   message("Tarefa criada. Os computadores executarão na próxima sincronização."); await loadData();
 }
 
@@ -153,8 +157,9 @@ async function loadUsers() { try { const data = await adminFunction("list"); mes
 $("login-form").addEventListener("submit", async (event) => { event.preventDefault(); loginMessage(""); const { data, error } = await supabase.auth.signInWithPassword({ email: $("login-email").value.trim(), password: $("login-password").value }); if (error) return loginMessage("E-mail ou senha inválidos."); await enterApp(data.user); });
 $("logout-button").addEventListener("click", async () => { await supabase.auth.signOut(); showLogin(); });
 $("navigation").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (!button) return; document.querySelectorAll(".navigation button,.view").forEach((el) => el.classList.remove("active")); button.classList.add("active"); $(`view-${button.dataset.view}`).classList.add("active"); $("page-title").textContent = $("breadcrumb").textContent = button.childNodes[0].textContent.trim(); if (button.dataset.view === "users") loadUsers(); if (button.dataset.view === "requests") loadRequests(); });
-$("software-search").addEventListener("input", renderSoftware); $("software-device").addEventListener("change", renderSoftware); $("release-select").addEventListener("change", () => { $("send-update").disabled = !state.selected.size || !$("release-select").value; });
+$("software-search").addEventListener("input", renderSoftware); $("software-device").addEventListener("change", renderSoftware); $("release-select").addEventListener("change", () => { $("send-update").disabled = !state.remoteUpdatesEnabled || !state.selected.size || !$("release-select").value; });
 $("inventory-refresh").addEventListener("click", () => createJob("inventory_refresh")); $("send-update").addEventListener("click", () => createJob("agent_update", $("release-select").value));
+$("toggle-remote-updates").addEventListener("click", async () => { const enabled = !state.remoteUpdatesEnabled; const { error } = await supabase.from("system_settings").update({ remote_updates_enabled: enabled, updated_at: new Date().toISOString(), updated_by: state.profile.email }).eq("id", true); if (error) return message("Não foi possível alterar as atualizações remotas.", true); state.remoteUpdatesEnabled = enabled; message(enabled ? "Atualizações remotas habilitadas." : "Atualizações remotas desabilitadas."); render(); });
 $("request-check-all").addEventListener("change", (event) => { document.querySelectorAll(".request-check:not(:disabled)").forEach((box) => { box.checked = event.target.checked; box.checked ? state.selectedRequests.add(box.dataset.request) : state.selectedRequests.delete(box.dataset.request); }); updateRequestButtons(); });
 $("approve-requests").addEventListener("click", () => decideRequests("approved"));
 $("reject-requests").addEventListener("click", () => decideRequests("rejected"));

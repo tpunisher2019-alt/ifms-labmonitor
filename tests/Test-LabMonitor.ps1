@@ -24,6 +24,8 @@ Assert-True (-not [bool]$network.enabled) 'Rede deve vir desabilitada até receb
 Assert-True (-not $network.PSObject.Properties['secretKey']) 'A configuração da estação não pode conter chave secreta do Supabase.'
 Assert-True (-not $network.PSObject.Properties['enrollmentToken']) 'O agente não deve depender de token de matrícula compartilhado.'
 Assert-True ([int]$network.syncIntervalSeconds -ge 1200) 'Intervalo padrão deve suportar 150 máquinas no orçamento do plano gratuito.'
+Assert-True ([bool]$network.updates.enabled) 'Atualizações remotas devem vir habilitadas no agente 2.3.2.'
+Assert-True (-not [bool]$network.updates.requireAuthenticode) 'O modo interno não deve exigir certificado Authenticode.'
 Assert-True (-not $network.PSObject.Properties['inventoryIntervalHours']) 'Inventário não pode ser coletado periodicamente.'
 
 Write-Host '3/6 Testando JSON Lines e fila persistente...'
@@ -75,6 +77,10 @@ try{
     Assert-True ($agentSource -match "'inventory_refresh'\s*\{[\s\S]*Collect-SoftwareInventoryOnRequest") 'Inventário sob demanda não está ligado à tarefa remota.'
     Assert-True ($agentSource -match "Poll-WallpaperChanges") 'Monitoramento de papel de parede não está ligado ao ciclo do agente.'
     Assert-True ($agentSource -match "'WallpaperChanged'") 'Alterações do papel de parede não estão marcadas como ocorrências sincronizáveis.'
+    $dashboardSource=Get-Content -LiteralPath (Join-Path $projectRoot 'dashboard\github-pages\app.js') -Raw -Encoding UTF8
+    Assert-True ($dashboardSource -match 'remote_updates_enabled') 'Painel não possui controle de atualizações remotas.'
+    $syncSource=Get-Content -LiteralPath (Join-Path $projectRoot 'supabase\functions\device-sync\index.ts') -Raw -Encoding UTF8
+    Assert-True ($syncSource -match 'remote_updates_enabled') 'Servidor não respeita o bloqueio de atualizações remotas.'
 
     Write-Host '6/6 Criando e validando um pacote de atualização...'
     $releaseDirectory=Join-Path $testRoot 'releases'
