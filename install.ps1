@@ -46,7 +46,7 @@ $directories = @(
 )
 foreach ($directory in $directories) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
 
-foreach ($scriptName in @('Agent.ps1','SessionWatcher.ps1','Common.ps1','ForegroundProvider.ps1','Inventory.ps1','NetworkClient.ps1','UpdateWorker.ps1')) {
+foreach ($scriptName in @('Agent.ps1','SessionWatcher.ps1','Common.ps1','ForegroundProvider.ps1','Inventory.ps1','NetworkClient.ps1','UpdateWorker.ps1','WallpaperMonitor.ps1')) {
     Copy-Item -LiteralPath (Join-Path $sourceRoot ('src\' + $scriptName)) -Destination (Join-Path $InstallPath ('src\' + $scriptName)) -Force
 }
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'VERSION') -Destination (Join-Path $InstallPath 'VERSION') -Force

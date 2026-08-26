@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ForegroundProvider.ps1')
 . (Join-Path $PSScriptRoot 'Inventory.ps1')
 . (Join-Path $PSScriptRoot 'NetworkClient.ps1')
+. (Join-Path $PSScriptRoot 'WallpaperMonitor.ps1')
 
 $paths = @{
     Policy = Join-Path $RootPath 'config\policy.json'
@@ -76,12 +77,12 @@ function Write-MonitorEvent {
 
 function Test-ReportableEventType {
     param([string]$Type)
-    return $Type -in @('ProhibitedApplicationDetected', 'ProhibitedApplicationStopped', 'SuspiciousApplicationDetected', 'SuspiciousApplicationStopped')
+    return $Type -in @('ProhibitedApplicationDetected', 'ProhibitedApplicationStopped', 'SuspiciousApplicationDetected', 'SuspiciousApplicationStopped', 'WallpaperChanged')
 }
 
 function New-AgentState {
     return @{
-        schemaVersion = 2; savedAtUtc = Get-LmUtcNow; sessions = @{}; observed = @{}
+        schemaVersion = 2; savedAtUtc = Get-LmUtcNow; sessions = @{}; observed = @{}; wallpapers = @{}
         lastInventoryAtUtc = $null; lastInventoryHash = $null; lastSyncAtUtc = $null
         handledJobIds = @{}; networkBackfillCompleted = $false
     }
@@ -94,6 +95,7 @@ function Import-AgentState {
         $converted = ConvertTo-HashtableDeep $raw
         if (-not $converted.ContainsKey('sessions')) { $converted.sessions = @{} }
         if (-not $converted.ContainsKey('observed')) { $converted.observed = @{} }
+        if (-not $converted.ContainsKey('wallpapers')) { $converted.wallpapers = @{} }
         if (-not $converted.ContainsKey('handledJobIds')) { $converted.handledJobIds = @{} }
         if (-not $converted.ContainsKey('lastInventoryAtUtc')) { $converted.lastInventoryAtUtc = $null }
         if (-not $converted.ContainsKey('lastInventoryHash')) { $converted.lastInventoryHash = $null }
@@ -347,6 +349,44 @@ function Get-ProcessUser {
     return 'unknown'
 }
 
+function Poll-WallpaperChanges {
+    $now = Get-LmUtcNow
+    $seen = @{}
+    foreach ($snapshot in @(Get-LmWallpaperSnapshots)) {
+        $key = '{0}|{1}' -f $snapshot.sessionId, $snapshot.sid
+        $seen[$key] = $true
+        if (-not $script:state.wallpapers.ContainsKey($key)) {
+            $script:state.wallpapers[$key] = @{
+                fingerprint = [string]$snapshot.fingerprint
+                lastSeenAtUtc = $now
+            }
+            continue
+        }
+        $previous = $script:state.wallpapers[$key]
+        if ([string]$previous.fingerprint -ne [string]$snapshot.fingerprint) {
+            $session = Get-OrCreateSession -SessionId ([int]$snapshot.sessionId) -User ([string]$snapshot.user)
+            Write-MonitorEvent -Type 'WallpaperChanged' -Session $session -TimestampUtc $now -Data @{
+                previousFingerprint = [string]$previous.fingerprint
+                currentFingerprint = [string]$snapshot.fingerprint
+                imageStored = $false
+            }
+        }
+        $previous.fingerprint = [string]$snapshot.fingerprint
+        $previous.lastSeenAtUtc = $now
+    }
+
+    $cutoff = [DateTime]::UtcNow.AddDays(-7)
+    foreach ($key in @($script:state.wallpapers.Keys)) {
+        if ($seen.ContainsKey($key)) { continue }
+        try {
+            if ([DateTime]::Parse([string]$script:state.wallpapers[$key].lastSeenAtUtc).ToUniversalTime() -lt $cutoff) {
+                $script:state.wallpapers.Remove($key)
+            }
+        }
+        catch { $script:state.wallpapers.Remove($key) }
+    }
+}
+
 function Test-RuleMatch {
     param($Process, $Rule)
     if (-not $Rule.enabled) { return $false }
@@ -455,6 +495,7 @@ do {
         }
         Process-Inbox
         Poll-ProhibitedProcesses -Policy $policy
+        Poll-WallpaperChanges
         if ($null -ne $networkConfig -and [bool]$networkConfig.enabled) {
             Queue-PendingUpdateResults
             $syncSeconds = if ($networkConfig.syncIntervalSeconds) { [Math]::Max(1200, [int]$networkConfig.syncIntervalSeconds) } else { 1200 }

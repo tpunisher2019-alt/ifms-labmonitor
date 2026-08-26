@@ -11,7 +11,7 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 . (Join-Path $projectRoot 'src\Common.ps1')
 $expectedVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
 if ($Version -ne $expectedVersion) { throw "A versão solicitada ($Version) difere do arquivo VERSION ($expectedVersion)." }
-$files = @('Agent.ps1','Common.ps1','ForegroundProvider.ps1','Inventory.ps1','NetworkClient.ps1','UpdateWorker.ps1','SessionWatcher.ps1')
+$files = @('Agent.ps1','Common.ps1','ForegroundProvider.ps1','Inventory.ps1','NetworkClient.ps1','UpdateWorker.ps1','SessionWatcher.ps1','WallpaperMonitor.ps1')
 $trusted = @($TrustedSignerThumbprints | ForEach-Object { ([string]$_).Replace(' ','').ToUpperInvariant() })
 $stage = Join-Path ([IO.Path]::GetTempPath()) ('labmonitor-release-' + [Guid]::NewGuid().ToString('N'))
 try {
@@ -41,4 +41,3 @@ try {
 finally {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 }
-

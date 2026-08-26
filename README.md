@@ -1,6 +1,6 @@
 # IFMS LabMonitor — versão 2
 
-Plataforma para monitorar sessões Windows em laboratórios, detectar aplicativos proibidos, enviar eventos a um servidor central, inventariar softwares e atualizar o agente remotamente. Não captura tela, não registra teclas e não monitora `Alt+Tab`.
+Plataforma para monitorar sessões Windows em laboratórios, detectar aplicativos proibidos e alterações do papel de parede, enviar eventos a um servidor central, inventariar softwares e atualizar o agente remotamente. Não captura tela, não armazena a imagem do papel de parede, não registra teclas e não monitora `Alt+Tab`.
 
 ## O que está implementado
 
@@ -8,6 +8,7 @@ Plataforma para monitorar sessões Windows em laboratórios, detectar aplicativo
 - contexto local de login, logoff, bloqueio e desbloqueio, sem enviar esses eventos ao servidor;
 - identificação de hostname, usuário Windows/GCPW visível no Windows e Session ID;
 - detecção local de Roblox, Minecraft e X-VPN;
+- registro de troca do papel de parede com usuário, computador e horário, sem enviar a imagem;
 - agrupamento por sessão com primeira/última detecção e contagem de execuções;
 - logs locais JSON Lines e fila de saída persistente;
 - envio em lotes para uma Edge Function do Supabase, com repetição automática quando a rede falha;
@@ -89,7 +90,7 @@ O painel não envia comandos PowerShell arbitrários. Ele cria somente tarefas p
 Crie o pacote:
 
 ```powershell
-.\tools\New-AgentRelease.ps1 -Version 2.3.0 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
+.\tools\New-AgentRelease.ps1 -Version 2.3.1 -RequireAuthenticode -TrustedSignerThumbprints SEU_THUMBPRINT
 ```
 
 Depois, envie o ZIP ao bucket privado `agent-releases` e cadastre versão, caminho e SHA-256 em `agent_releases`. O painel poderá direcionar essa versão para máquinas selecionadas.

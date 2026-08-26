@@ -30,6 +30,7 @@ Write-Host '3/6 Testando JSON Lines e fila persistente...'
 . (Join-Path $projectRoot 'src\Common.ps1')
 . (Join-Path $projectRoot 'src\NetworkClient.ps1')
 . (Join-Path $projectRoot 'src\Inventory.ps1')
+. (Join-Path $projectRoot 'src\WallpaperMonitor.ps1')
 $testRoot=Join-Path ([IO.Path]::GetTempPath()) ('ifms-labmonitor-test-'+[Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot -Force|Out-Null
 try{
@@ -44,6 +45,10 @@ try{
     Assert-True ($registration.hardwareFingerprint -match '^[a-f0-9]{64}$') 'Impressão digital do hardware inválida.'
     Assert-True ($registration.installationId -eq $registration.hardwareFingerprint) 'A identidade estável não pode depender do nome do Windows.'
     Assert-True ((New-LmRandomSecret) -match '^[a-f0-9]{64}$') 'Segredo local de autorização inválido.'
+    $wallpaperA=Get-LmWallpaperFingerprint -WallpaperPath 'C:\Windows\Web\Wallpaper\img0.jpg' -TranscodedLength 1024 -TranscodedLastWriteTicks 100
+    $wallpaperB=Get-LmWallpaperFingerprint -WallpaperPath 'C:\Windows\Web\Wallpaper\img0.jpg' -TranscodedLength 1024 -TranscodedLastWriteTicks 101
+    Assert-True ($wallpaperA -match '^[a-f0-9]{64}$') 'Impressão digital do papel de parede inválida.'
+    Assert-True ($wallpaperA -ne $wallpaperB) 'Uma alteração no papel de parede deve mudar sua impressão digital.'
 
     Write-Host '4/6 Coletando inventário real do Windows...'
     $inventory=Save-LmInventorySnapshot -Path (Join-Path $testRoot 'inventory.json')
@@ -68,6 +73,8 @@ try{
     $agentSource=Get-Content -LiteralPath (Join-Path $projectRoot 'src\Agent.ps1') -Raw -Encoding UTF8
     Assert-True ($agentSource -notmatch 'Update-SoftwareInventoryIfDue') 'Inventário periódico ainda está presente no agente.'
     Assert-True ($agentSource -match "'inventory_refresh'\s*\{[\s\S]*Collect-SoftwareInventoryOnRequest") 'Inventário sob demanda não está ligado à tarefa remota.'
+    Assert-True ($agentSource -match "Poll-WallpaperChanges") 'Monitoramento de papel de parede não está ligado ao ciclo do agente.'
+    Assert-True ($agentSource -match "'WallpaperChanged'") 'Alterações do papel de parede não estão marcadas como ocorrências sincronizáveis.'
 
     Write-Host '6/6 Criando e validando um pacote de atualização...'
     $releaseDirectory=Join-Path $testRoot 'releases'
