@@ -79,8 +79,15 @@ try{
     Assert-True ($agentSource -match "'WallpaperChanged'") 'Alterações do papel de parede não estão marcadas como ocorrências sincronizáveis.'
     $dashboardSource=Get-Content -LiteralPath (Join-Path $projectRoot 'dashboard\github-pages\app.js') -Raw -Encoding UTF8
     Assert-True ($dashboardSource -match 'remote_updates_enabled') 'Painel não possui controle de atualizações remotas.'
+    Assert-True ($dashboardSource -match 'update-platform-select') 'Painel não separa atualizações por sistema operacional.'
+    Assert-True ($dashboardSource -match 'compatibleSelectedIds') 'Painel não filtra os computadores compatíveis antes de criar a tarefa.'
     $syncSource=Get-Content -LiteralPath (Join-Path $projectRoot 'supabase\functions\device-sync\index.ts') -Raw -Encoding UTF8
     Assert-True ($syncSource -match 'remote_updates_enabled') 'Servidor não respeita o bloqueio de atualizações remotas.'
+    Assert-True ($syncSource -match 'platformFromOsType') 'Servidor não valida o sistema operacional do pacote.'
+    Assert-True ($syncSource -match 'release\.platform') 'Servidor não compara a plataforma da versão com a estação.'
+    $platformMigration=Get-Content -LiteralPath (Join-Path $projectRoot 'supabase\migrations\20260831120000_separate_agent_releases_by_platform.sql') -Raw -Encoding UTF8
+    Assert-True ($platformMigration -match 'incompatible_device_platform') 'Banco não bloqueia tarefas com plataformas incompatíveis.'
+    Assert-True ($platformMigration -match "platform in \('windows', 'linux'\)") 'Banco não restringe as plataformas conhecidas.'
 
     Write-Host '6/6 Criando e validando um pacote de atualização...'
     $releaseDirectory=Join-Path $testRoot 'releases'

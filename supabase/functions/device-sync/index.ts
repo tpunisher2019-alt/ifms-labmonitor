@@ -31,6 +31,13 @@ function intersects(left: string[], right: unknown) {
   return left.some((value) => values.has(value.toUpperCase()));
 }
 
+function platformFromOsType(value: unknown) {
+  const os = String(value ?? "").trim().toLowerCase();
+  if (os.startsWith("win")) return "windows";
+  if (["linux", "debian", "ubuntu"].includes(os)) return "linux";
+  return os;
+}
+
 async function findMatchingDevice(db: ReturnType<typeof createClient>, metadata: Record<string, unknown>) {
   const { data: devices } = await db.from("devices")
     .select("id,hostname,hardware_fingerprint,mac_addresses,local_ip_addresses,public_ip")
@@ -212,7 +219,7 @@ Deno.serve(async (request) => {
     const deviceId = request.headers.get("x-device-id");
     const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
     if (!deviceId || !bearer) return json({ error: "device_auth_required" }, 401);
-    const { data: device } = await db.from("devices").select("id,device_secret_hash,status")
+    const { data: device } = await db.from("devices").select("id,device_secret_hash,status,os_type")
       .eq("id", deviceId).maybeSingle();
     if (!device || device.status === "disabled" || device.device_secret_hash !== await sha256(bearer)) {
       return json({ error: "device_auth_denied" }, 403);
@@ -281,12 +288,20 @@ Deno.serve(async (request) => {
       if (job.type === "agent_update" && !remoteUpdatesEnabled) continue;
       const payload = { ...(job.payload ?? {}) };
       if (job.type === "agent_update" && payload.releaseId) {
-        const { data: release } = await db.from("agent_releases").select("version,storage_path,sha256,active")
+        const { data: release } = await db.from("agent_releases").select("version,storage_path,sha256,active,platform")
           .eq("id", payload.releaseId).eq("active", true).maybeSingle();
         if (!release) continue;
+        if (platformFromOsType(device.os_type) !== release.platform) {
+          await db.from("device_jobs").update({
+            status: "failed",
+            completed_at: new Date().toISOString(),
+            result: { status: "failed", message: "Pacote incompatível com o sistema operacional da estação." },
+          }).eq("job_id", job.id).eq("device_id", deviceId).eq("status", "pending");
+          continue;
+        }
         const { data: signed } = await db.storage.from("agent-releases").createSignedUrl(release.storage_path, 900);
         if (!signed?.signedUrl) continue;
-        Object.assign(payload, { version: release.version, sha256: release.sha256, downloadUrl: signed.signedUrl });
+        Object.assign(payload, { version: release.version, platform: release.platform, sha256: release.sha256, downloadUrl: signed.signedUrl });
       }
       await db.from("device_jobs").update({ status: "leased", leased_at: new Date().toISOString() })
         .eq("job_id", job.id).eq("device_id", deviceId).eq("status", "pending");
