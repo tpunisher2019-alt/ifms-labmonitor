@@ -38,6 +38,8 @@ test("separa inventário de atualizações e permite escolher computadores", asy
   assert.match(page, /id="inventory-job-rows"/);
   assert.match(page, /id="update-job-rows"/);
   assert.match(page, />Aplicar atualização</);
+  assert.match(page, /id="download-release"[^>]*>Baixar versão</);
+  assert.match(app, /adminFunction\("release_download"/);
   assert.match(app, /job\.jobs\?\.type === "inventory_refresh"/);
   assert.match(app, /job\.jobs\?\.type === "agent_update"/);
 });
@@ -58,6 +60,8 @@ test("oferece remoção protegida de usuários e métricas de armazenamento", as
   assert.match(edgeFunction, /body:JSON\.stringify\(\{active:true\}\)/);
   assert.match(edgeFunction, /storage\/v1\/object\/agent-releases/);
   assert.match(edgeFunction, /prefixes:obsolete\.map/);
+  assert.match(edgeFunction, /body\.action==="release_download"/);
+  assert.match(edgeFunction, /createSignedUrl\(release\.storage_path,300/);
   assert.match(page, /mantém somente a versão atual e a anterior/);
   assert.match(migrations, /revoke all on function public\.get_admin_storage_metrics\(\) from public/);
   assert.match(migrations, /security invoker/);

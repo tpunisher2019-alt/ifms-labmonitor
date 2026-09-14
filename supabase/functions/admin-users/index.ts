@@ -1,3 +1,5 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+
 const cors={"access-control-allow-origin":"*","access-control-allow-headers":"authorization, x-client-info, apikey, content-type","access-control-allow-methods":"POST,OPTIONS","content-type":"application/json"};
 const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:cors});
 
@@ -43,6 +45,19 @@ Deno.serve(async(request)=>{
     const response=await fetch(`${url}/rest/v1/rpc/get_admin_storage_metrics`,{method:"POST",headers:baseHeaders,body:"{}"});
     const metrics=await response.json().catch(()=>null);
     return reply({metrics,releaseRetention:retention},response.ok?200:502);
+  }
+  if(body.action==="release_download"){
+    const releaseId=String(body.releaseId||"");
+    if(!/^[0-9a-f-]{36}$/i.test(releaseId))return reply({error:"invalid_release"},400);
+    const response=await fetch(`${url}/rest/v1/agent_releases?id=eq.${encodeURIComponent(releaseId)}&active=eq.true&select=id,version,platform,storage_path`,{headers:baseHeaders});
+    const [release]=await response.json().catch(()=>[]);
+    if(!response.ok)return reply({error:"release_lookup_failed"},502);
+    if(!release)return reply({error:"release_not_found"},404);
+    const storage=createClient(url,secret,{auth:{persistSession:false,autoRefreshToken:false}});
+    const fileName=`IFMS-LabMonitor-${release.platform}-${release.version}.zip`;
+    const {data,error}=await storage.storage.from("agent-releases").createSignedUrl(release.storage_path,300,{download:fileName});
+    if(error||!data?.signedUrl)return reply({error:"download_link_failed"},502);
+    return reply({downloadUrl:data.signedUrl,fileName,expiresIn:300});
   }
   if(body.action==="create"){
     const email=String(body.email||"").trim().toLowerCase(),fullName=String(body.fullName||"").trim(),password=String(body.password||""),role=body.role==="admin"?"admin":body.role==="monitor"?"monitor":"";
