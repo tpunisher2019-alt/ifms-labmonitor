@@ -1,4 +1,4 @@
-IFMS LabMonitor - Agente para Windows 2.3.0
+IFMS LabMonitor - Agente para Windows 2.3.2
 
 Este pacote solicita a conexão do computador ao painel do IFMS LabMonitor.
 
@@ -9,7 +9,7 @@ COMO INSTALAR OU ATUALIZAR
 3. Aceite a solicitação de permissão do Windows.
 4. Aguarde a mensagem "IFMS LabMonitor instalado".
 5. Saia e entre novamente na conta do Windows, ou reinicie o computador.
-6. Em uma instalação nova, abra "Solicitações" no painel, confira MAC, IP e nome da máquina e autorize o computador.
+6. Em uma máquina nova, abra "Solicitações" no painel, confira MAC, IP e nome e autorize o computador. Máquinas já conhecidas pelo mesmo hardware são reconhecidas automaticamente.
 7. Aguarde a próxima comunicação; a máquina aparecerá em "Computadores".
 
 COMPORTAMENTO DESTA VERSÃO

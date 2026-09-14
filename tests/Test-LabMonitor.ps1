@@ -102,6 +102,16 @@ try{
     Assert-True ($LASTEXITCODE -eq 0) 'A criação do pacote de atualização falhou.'
     $zip=Get-ChildItem $releaseDirectory -Filter '*.zip'|Select-Object -First 1
     Assert-True ($null -ne $zip -and (Get-LmSha256File $zip.FullName) -match '^[a-f0-9]{64}$') 'Pacote remoto ou hash inválido.'
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $releaseArchive=[IO.Compression.ZipFile]::OpenRead($zip.FullName)
+    try {
+        $releaseEntries=@($releaseArchive.Entries|ForEach-Object{$_.FullName -replace '\\','/'})
+        Assert-True ($releaseEntries -contains 'install.bat') 'Pacote Windows não contém o instalador em lote.'
+        Assert-True ($releaseEntries -contains 'install.ps1') 'Pacote Windows não contém o instalador PowerShell.'
+        Assert-True ($releaseEntries -contains 'config/policy.json') 'Pacote Windows não contém a política padrão.'
+        Assert-True ($releaseEntries -contains 'VERSION') 'Pacote Windows não contém a versão.'
+    }
+    finally { $releaseArchive.Dispose() }
 }
 finally{if(Test-Path $testRoot){Remove-Item -LiteralPath $testRoot -Recurse -Force}}
 

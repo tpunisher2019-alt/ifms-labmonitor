@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'outputs'),
+    [string]$NetworkConfigPath,
     [switch]$RequireAuthenticode,
     [string[]]$TrustedSignerThumbprints = @()
 )
@@ -16,6 +17,7 @@ $trusted = @($TrustedSignerThumbprints | ForEach-Object { ([string]$_).Replace('
 $stage = Join-Path ([IO.Path]::GetTempPath()) ('labmonitor-release-' + [Guid]::NewGuid().ToString('N'))
 try {
     New-Item -ItemType Directory -Path (Join-Path $stage 'src') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $stage 'config') -Force | Out-Null
     $manifestFiles = @()
     foreach ($name in $files) {
         $source = Join-Path $projectRoot ('src\' + $name)
@@ -29,6 +31,16 @@ try {
         Copy-Item -LiteralPath $source -Destination (Join-Path $stage ('src\' + $name))
         $manifestFiles += [ordered]@{ path = $name; sha256 = Get-LmSha256File $source }
     }
+    foreach ($name in @('install.ps1','install.bat','uninstall.ps1','uninstall.bat','VERSION')) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination (Join-Path $stage $name)
+    }
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'config\policy.json') -Destination (Join-Path $stage 'config\policy.json')
+    if ($NetworkConfigPath) {
+        Copy-Item -LiteralPath $NetworkConfigPath -Destination (Join-Path $stage 'config\network.json')
+    } else {
+        Copy-Item -LiteralPath (Join-Path $projectRoot 'config\network.example.json') -Destination (Join-Path $stage 'config\network.example.json')
+    }
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\LEIA-ME-AGENTE-WINDOWS.txt') -Destination (Join-Path $stage 'LEIA-ME - Agente Windows.txt')
     Write-LmAtomicJson -Path (Join-Path $stage 'manifest.json') -Value ([ordered]@{
         schemaVersion = 1; product = 'IFMS LabMonitor Agent'; version = $Version
         createdAtUtc = Get-LmUtcNow; files = $manifestFiles
