@@ -25,9 +25,13 @@ function Get-LmDeviceRegistrationInfo {
     $operatingSystem = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
     $bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue
     $baseBoard = Get-CimInstance Win32_BaseBoard -ErrorAction SilentlyContinue
-    $adapters = @(Get-CimInstance Win32_NetworkAdapterConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPEnabled })
-    $macs = @($adapters | ForEach-Object { [string]$_.MACAddress } | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
-    $ips = @($adapters | ForEach-Object { @($_.IPAddress) } | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notmatch '^(127\.|169\.254\.)' } | Sort-Object -Unique)
+    $activeConfigurations = @(Get-CimInstance Win32_NetworkAdapterConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPEnabled })
+    $physicalAdapters = @(Get-CimInstance Win32_NetworkAdapter -ErrorAction SilentlyContinue | Where-Object { $_.PhysicalAdapter -eq $true -and $_.MACAddress })
+    $macs = @($physicalAdapters | ForEach-Object { [string]$_.MACAddress } | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
+    if (-not $macs.Count) {
+        $macs = @($activeConfigurations | ForEach-Object { [string]$_.MACAddress } | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
+    }
+    $ips = @($activeConfigurations | ForEach-Object { @($_.IPAddress) } | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notmatch '^(127\.|169\.254\.)' } | Sort-Object -Unique)
     $machineUuid = if ($null -ne $computer -and $computer.UUID) { [string]$computer.UUID } else { $env:COMPUTERNAME }
     $biosSerial = if ($null -ne $bios) { [string]$bios.SerialNumber } else { '' }
     $baseBoardSerial = if ($null -ne $baseBoard) { [string]$baseBoard.SerialNumber } else { '' }
@@ -38,8 +42,14 @@ function Get-LmDeviceRegistrationInfo {
     if (-not $hardwareParts.Count) { $hardwareParts += @($macs | ForEach-Object { 'mac:' + $_ }) }
     if (-not $hardwareParts.Count) { $hardwareParts += 'host:' + $env:COMPUTERNAME.ToUpperInvariant() }
     $hardwareFingerprint = Get-LmSha256Text -Text ($hardwareParts -join '|')
+    # A instalacao precisa distinguir computadores cujo firmware informa o
+    # mesmo UUID/serial (comum em algumas placas e imagens clonadas). O MAC
+    # fisico complementa a impressao do hardware sem depender do nome do PC.
+    $installationParts = @('hardware:' + $hardwareFingerprint)
+    $installationParts += @($macs | ForEach-Object { 'mac:' + $_ })
+    $installationId = Get-LmSha256Text -Text ($installationParts -join '|')
     return [ordered]@{
-        installationId = $hardwareFingerprint
+        installationId = $installationId
         hostname = $env:COMPUTERNAME
         machineUuidHash = Get-LmSha256Text -Text $machineUuid
         hardwareFingerprint = $hardwareFingerprint
@@ -129,7 +139,8 @@ function Invoke-LmNetworkSync {
         [string]$RootPath,
         $NetworkConfig,
         [string]$AgentVersion,
-        [string]$InventoryPath
+        [string]$InventoryPath,
+        [switch]$ReEnrollmentAttempted
     )
     $identity = Initialize-LmDeviceIdentity -RootPath $RootPath -NetworkConfig $NetworkConfig -AgentVersion $AgentVersion
     $registration = Get-LmDeviceRegistrationInfo
@@ -162,6 +173,13 @@ function Invoke-LmNetworkSync {
         items = $items
         inventory = $inventory
     })
+    if ($response.reEnrollmentRequired -eq $true) {
+        if ($ReEnrollmentAttempted) { throw 'O computador precisa ser autorizado novamente no painel.' }
+        $identityPath = Get-LmDeviceIdentityPath $RootPath
+        if (Test-Path -LiteralPath $identityPath) { Remove-Item -LiteralPath $identityPath -Force }
+        return Invoke-LmNetworkSync -RootPath $RootPath -NetworkConfig $NetworkConfig `
+            -AgentVersion $AgentVersion -InventoryPath $InventoryPath -ReEnrollmentAttempted
+    }
     if ($response.accepted) {
         foreach ($file in $files) { Remove-Item -LiteralPath $file.FullName -Force }
         if ($null -ne $inventory -and (Test-Path -LiteralPath $pendingInventory)) { Remove-Item -LiteralPath $pendingInventory -Force }

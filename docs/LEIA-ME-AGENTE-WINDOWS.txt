@@ -1,4 +1,4 @@
-IFMS LabMonitor - Agente para Windows 2.3.2
+IFMS LabMonitor - Agente para Windows 2.3.3
 
 Este pacote solicita a conexão do computador ao painel do IFMS LabMonitor.
 

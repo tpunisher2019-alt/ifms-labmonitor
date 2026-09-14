@@ -46,10 +46,13 @@ async function findMatchingDevice(db: ReturnType<typeof createClient>, metadata:
   for (const device of devices ?? []) {
     let score = 0;
     const reasons: string[] = [];
-    if (metadata.hardware_fingerprint && device.hardware_fingerprint === metadata.hardware_fingerprint) {
+    const sameHardware = Boolean(metadata.hardware_fingerprint)
+      && device.hardware_fingerprint === metadata.hardware_fingerprint;
+    const sameMac = intersects(metadata.mac_addresses as string[], device.mac_addresses);
+    if (sameHardware) {
       score += 100; reasons.push("mesmo hardware");
     }
-    if (intersects(metadata.mac_addresses as string[], device.mac_addresses)) {
+    if (sameMac) {
       score += 70; reasons.push("mesmo MAC");
     }
     if (intersects(metadata.local_ip_addresses as string[], device.local_ip_addresses)) {
@@ -61,9 +64,13 @@ async function findMatchingDevice(db: ReturnType<typeof createClient>, metadata:
     if (String(device.hostname).toUpperCase() === String(metadata.hostname).toUpperCase()) {
       score += 20; reasons.push("mesmo nome anterior");
     }
-    if (!best || score > best.score) best = { id: device.id, score, reasons };
+    // Nunca reutilize um cadastro somente por UUID/serial, nome ou IP. Alguns
+    // firmwares e imagens clonadas repetem esses valores em maquinas distintas.
+    if (sameHardware && sameMac && (!best || score > best.score)) {
+      best = { id: device.id, score, reasons };
+    }
   }
-  return best && best.score >= 70 ? best : null;
+  return best;
 }
 
 Deno.serve(async (request) => {
@@ -125,8 +132,10 @@ Deno.serve(async (request) => {
 
       const { data: enrollmentSettings } = await db.from("system_settings")
         .select("auto_authorize_known_devices").eq("id", true).maybeSingle();
+      const matchReasons = strings(enrollment.match_reasons);
       const recognizedByHardware = Boolean(enrollment.matched_device_id)
-        && strings(enrollment.match_reasons).includes("mesmo hardware");
+        && matchReasons.includes("mesmo hardware")
+        && matchReasons.includes("mesmo MAC");
       if (enrollment.status === "pending"
         && enrollmentSettings?.auto_authorize_known_devices === true
         && recognizedByHardware) {
@@ -153,16 +162,6 @@ Deno.serve(async (request) => {
         const matched = await db.from("devices").select("id,device_secret_hash,status")
           .eq("id", enrollment.matched_device_id).maybeSingle();
         device = matched.data;
-      }
-      if (!device) {
-        const existing = await db.from("devices").select("id,device_secret_hash,status")
-          .eq("installation_id", installationId).maybeSingle();
-        device = existing.data;
-      }
-      if (!device && metadata.hardware_fingerprint) {
-        const existing = await db.from("devices").select("id,device_secret_hash,status")
-          .eq("hardware_fingerprint", metadata.hardware_fingerprint).maybeSingle();
-        device = existing.data;
       }
       if (device) {
         const rotated = await db.from("devices").update({
@@ -232,10 +231,25 @@ Deno.serve(async (request) => {
     const deviceId = request.headers.get("x-device-id");
     const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
     if (!deviceId || !bearer) return json({ error: "device_auth_required" }, 401);
-    const { data: device } = await db.from("devices").select("id,device_secret_hash,status,os_type")
+    const { data: device } = await db.from("devices")
+      .select("id,device_secret_hash,status,os_type,hardware_fingerprint,mac_addresses")
       .eq("id", deviceId).maybeSingle();
-    if (!device || device.status === "disabled" || device.device_secret_hash !== await sha256(bearer)) {
+    if (!device || device.status === "disabled") {
       return json({ error: "device_auth_denied" }, 403);
+    }
+    if (device.device_secret_hash !== await sha256(bearer)) {
+      return json({ accepted: false, reEnrollmentRequired: true, error: "device_auth_changed" });
+    }
+
+    const incomingFingerprint = String(body.hardwareFingerprint ?? "").trim().slice(0, 64);
+    const incomingMacs = strings(body.macAddresses);
+    const storedMacs = strings(device.mac_addresses);
+    const fingerprintChanged = Boolean(device.hardware_fingerprint && incomingFingerprint)
+      && device.hardware_fingerprint !== incomingFingerprint;
+    const macChanged = storedMacs.length > 0 && incomingMacs.length > 0
+      && !intersects(incomingMacs, storedMacs);
+    if (fingerprintChanged || macChanged) {
+      return json({ accepted: false, reEnrollmentRequired: true, error: "device_identity_mismatch" });
     }
 
     const deviceUpdate: Record<string, unknown> = {

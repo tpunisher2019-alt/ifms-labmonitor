@@ -24,7 +24,7 @@ Assert-True (-not [bool]$network.enabled) 'Rede deve vir desabilitada até receb
 Assert-True (-not $network.PSObject.Properties['secretKey']) 'A configuração da estação não pode conter chave secreta do Supabase.'
 Assert-True (-not $network.PSObject.Properties['enrollmentToken']) 'O agente não deve depender de token de matrícula compartilhado.'
 Assert-True ([int]$network.syncIntervalSeconds -ge 1200) 'Intervalo padrão deve suportar 150 máquinas no orçamento do plano gratuito.'
-Assert-True ([bool]$network.updates.enabled) 'Atualizações remotas devem vir habilitadas no agente 2.3.2.'
+Assert-True ([bool]$network.updates.enabled) 'Atualizações remotas devem vir habilitadas no agente atual.'
 Assert-True (-not [bool]$network.updates.requireAuthenticode) 'O modo interno não deve exigir certificado Authenticode.'
 Assert-True (-not $network.PSObject.Properties['inventoryIntervalHours']) 'Inventário não pode ser coletado periodicamente.'
 
@@ -45,7 +45,7 @@ try{
     Assert-True ($registration.installationId -match '^[a-f0-9]{64}$') 'Identificador da instalação inválido.'
     Assert-True ($registration.machineUuidHash -match '^[a-f0-9]{64}$') 'Hash do identificador físico inválido.'
     Assert-True ($registration.hardwareFingerprint -match '^[a-f0-9]{64}$') 'Impressão digital do hardware inválida.'
-    Assert-True ($registration.installationId -eq $registration.hardwareFingerprint) 'A identidade estável não pode depender do nome do Windows.'
+    Assert-True ($registration.installationId -ne $registration.hardwareFingerprint) 'A instalação deve combinar hardware e MAC para separar máquinas com firmware clonado.'
     Assert-True ((New-LmRandomSecret) -match '^[a-f0-9]{64}$') 'Segredo local de autorização inválido.'
     $wallpaperA=Get-LmWallpaperFingerprint -WallpaperPath 'C:\Windows\Web\Wallpaper\img0.jpg' -TranscodedLength 1024 -TranscodedLastWriteTicks 100
     $wallpaperB=Get-LmWallpaperFingerprint -WallpaperPath 'C:\Windows\Web\Wallpaper\img0.jpg' -TranscodedLength 1024 -TranscodedLastWriteTicks 101
@@ -89,8 +89,11 @@ try{
     Assert-True ($syncSource -match 'remote_updates_enabled') 'Servidor não respeita o bloqueio de atualizações remotas.'
     Assert-True ($syncSource -match 'platformFromOsType') 'Servidor não valida o sistema operacional do pacote.'
     Assert-True ($syncSource -match 'release\.platform') 'Servidor não compara a plataforma da versão com a estação.'
-    Assert-True ($syncSource -match 'recognizedByHardware[\s\S]*includes\("mesmo hardware"\)') 'Servidor não exige a identidade física exata para a autorização automática.'
+    Assert-True ($syncSource -match 'recognizedByHardware[\s\S]*includes\("mesmo hardware"\)[\s\S]*includes\("mesmo MAC"\)') 'Servidor não exige hardware e MAC para a autorização automática.'
     Assert-True ($syncSource -match 'enrollment\.status === "pending"[\s\S]*auto_authorize_known_devices[\s\S]*recognizedByHardware') 'Servidor não limita a automação a solicitações pendentes de máquinas conhecidas.'
+    Assert-True ($syncSource -match 'device_identity_mismatch') 'Servidor não bloqueia uma credencial copiada para outro computador.'
+    Assert-True ($syncSource -match 'if \(sameHardware && sameMac &&') 'Servidor ainda pode fundir máquinas sem confirmar hardware e MAC.'
+    Assert-True ($syncSource -notmatch '\.eq\("hardware_fingerprint", metadata\.hardware_fingerprint\)') 'Cadastro ainda reutiliza diretamente uma impressão de hardware possivelmente duplicada.'
     $platformMigration=Get-Content -LiteralPath (Join-Path $projectRoot 'supabase\migrations\20260831120000_separate_agent_releases_by_platform.sql') -Raw -Encoding UTF8
     Assert-True ($platformMigration -match 'incompatible_device_platform') 'Banco não bloqueia tarefas com plataformas incompatíveis.'
     Assert-True ($platformMigration -match "platform in \('windows', 'linux'\)") 'Banco não restringe as plataformas conhecidas.'
