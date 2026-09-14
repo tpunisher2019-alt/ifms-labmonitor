@@ -123,6 +123,19 @@ Deno.serve(async (request) => {
         enrollment = refreshed.data;
       }
 
+      const { data: enrollmentSettings } = await db.from("system_settings")
+        .select("auto_authorize_known_devices").eq("id", true).maybeSingle();
+      const recognizedByHardware = Boolean(enrollment.matched_device_id)
+        && strings(enrollment.match_reasons).includes("mesmo hardware");
+      if (enrollment.status === "pending"
+        && enrollmentSettings?.auto_authorize_known_devices === true
+        && recognizedByHardware) {
+        const approved = await db.from("device_enrollment_requests").update({ status: "approved" })
+          .eq("id", enrollment.id).eq("status", "pending").select("*").maybeSingle();
+        if (approved.error) return json({ error: "automatic_reauthorization_failed" }, 409);
+        if (approved.data) enrollment = approved.data;
+      }
+
       if (enrollment.status === "pending") return json({ enrollmentStatus: "pending", requestId: enrollment.id }, 202);
       if (enrollment.status === "rejected") return json({ enrollmentStatus: "rejected", requestId: enrollment.id }, 403);
       if (enrollment.status === "claimed" && enrollment.device_id) {

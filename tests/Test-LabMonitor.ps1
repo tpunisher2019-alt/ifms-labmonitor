@@ -81,10 +81,13 @@ try{
     Assert-True ($dashboardSource -match 'remote_updates_enabled') 'Painel não possui controle de atualizações remotas.'
     Assert-True ($dashboardSource -match 'update-platform-select') 'Painel não separa atualizações por sistema operacional.'
     Assert-True ($dashboardSource -match 'compatibleSelectedIds') 'Painel não filtra os computadores compatíveis antes de criar a tarefa.'
+    Assert-True ($dashboardSource -match 'auto_authorize_known_devices') 'Painel não possui controle de autorização automática para máquinas conhecidas.'
     $syncSource=Get-Content -LiteralPath (Join-Path $projectRoot 'supabase\functions\device-sync\index.ts') -Raw -Encoding UTF8
     Assert-True ($syncSource -match 'remote_updates_enabled') 'Servidor não respeita o bloqueio de atualizações remotas.'
     Assert-True ($syncSource -match 'platformFromOsType') 'Servidor não valida o sistema operacional do pacote.'
     Assert-True ($syncSource -match 'release\.platform') 'Servidor não compara a plataforma da versão com a estação.'
+    Assert-True ($syncSource -match 'recognizedByHardware[\s\S]*includes\("mesmo hardware"\)') 'Servidor não exige a identidade física exata para a autorização automática.'
+    Assert-True ($syncSource -match 'enrollment\.status === "pending"[\s\S]*auto_authorize_known_devices[\s\S]*recognizedByHardware') 'Servidor não limita a automação a solicitações pendentes de máquinas conhecidas.'
     $platformMigration=Get-Content -LiteralPath (Join-Path $projectRoot 'supabase\migrations\20260831120000_separate_agent_releases_by_platform.sql') -Raw -Encoding UTF8
     Assert-True ($platformMigration -match 'incompatible_device_platform') 'Banco não bloqueia tarefas com plataformas incompatíveis.'
     Assert-True ($platformMigration -match "platform in \('windows', 'linux'\)") 'Banco não restringe as plataformas conhecidas.'
