@@ -1,4 +1,21 @@
-# Agente Ubuntu
+# Agente Linux
+
+## Pacote Debian disponível
+
+A versão 1.0.1 atende Debian 11, 12 e 13 com Python 3 e `systemd`. Nos laboratórios sem `sudo`, a instalação deve ser feita entrando como root:
+
+```sh
+su -
+cd /caminho/da/pasta/IFMS-LabMonitor-Debian
+chmod +x install.sh uninstall.sh
+./install.sh
+```
+
+O monitoramento de papel de parede consulta especificamente as configurações `picture-uri` e `picture-uri-dark` da sessão GNOME. O pacote também mantém compatibilidade com XFCE, KDE, LXQt e LXDE.
+
+A instalação inicial e as revisões do agente Linux ainda são manuais. O painel bloqueia o envio remoto de pacotes Linux até existir um atualizador próprio para essa plataforma.
+
+## Ubuntu
 
 O painel e o Supabase já aceitam máquinas Windows e Ubuntu no mesmo cadastro. O agente Ubuntu deverá manter o mesmo protocolo de matrícula e sincronização do agente Windows.
 

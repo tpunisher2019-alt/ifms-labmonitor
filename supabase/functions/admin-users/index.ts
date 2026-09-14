@@ -18,16 +18,17 @@ Deno.serve(async(request)=>{
   if(!profile?.active||profile.role!=="admin")return reply({error:"admin_required"},403);
   const body=await request.json().catch(()=>({}));
   const cleanupReleases=async()=>{
-    const releasesResponse=await fetch(`${url}/rest/v1/agent_releases?select=id,version,storage_path&order=created_at.desc,id.desc`,{headers:baseHeaders});
+    const releasesResponse=await fetch(`${url}/rest/v1/agent_releases?select=id,version,platform,storage_path&order=created_at.desc,id.desc`,{headers:baseHeaders});
     const releases=await releasesResponse.json().catch(()=>[]);
     if(!releasesResponse.ok)return {ok:false,error:"release_list_failed",removed:[]};
-    const retained=releases.slice(0,2);
+    const retained=["windows","linux"].flatMap((platform)=>releases.filter((release:{platform:string})=>release.platform===platform).slice(0,2));
     if(retained.length){
       const retainedIds=retained.map((release:{id:string})=>release.id).join(",");
       const activateResponse=await fetch(`${url}/rest/v1/agent_releases?id=in.(${encodeURIComponent(retainedIds)})`,{method:"PATCH",headers:{...baseHeaders,Prefer:"return=minimal"},body:JSON.stringify({active:true})});
       if(!activateResponse.ok)return {ok:false,error:"release_activation_failed",removed:[]};
     }
-    const obsolete=releases.slice(2);
+    const retainedSet=new Set(retained.map((release:{id:string})=>release.id));
+    const obsolete=releases.filter((release:{id:string})=>!retainedSet.has(release.id));
     if(!obsolete.length)return {ok:true,removed:[]};
     const storageResponse=await fetch(`${url}/storage/v1/object/agent-releases`,{method:"DELETE",headers:baseHeaders,body:JSON.stringify({prefixes:obsolete.map((release:{storage_path:string})=>release.storage_path)})});
     if(!storageResponse.ok)return {ok:false,error:"storage_cleanup_failed",removed:[]};

@@ -57,8 +57,8 @@ test("oferece remoção protegida de usuários e métricas de armazenamento", as
   assert.match(app, /window\.confirm/);
   assert.match(edgeFunction, /body\.action==="delete"/);
   assert.match(edgeFunction, /admins\.length<=1/);
-  assert.match(edgeFunction, /releases\.slice\(2\)/);
-  assert.match(edgeFunction, /retained=releases\.slice\(0,2\)/);
+  assert.match(edgeFunction, /flatMap\(\(platform\)=>releases\.filter/);
+  assert.match(edgeFunction, /\.slice\(0,2\)/);
   assert.match(edgeFunction, /body:JSON\.stringify\(\{active:true\}\)/);
   assert.match(edgeFunction, /storage\/v1\/object\/agent-releases/);
   assert.match(edgeFunction, /prefixes:obsolete\.map/);
