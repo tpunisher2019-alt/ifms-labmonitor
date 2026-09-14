@@ -82,6 +82,7 @@ try{
     Assert-True ($dashboardSource -match 'update-platform-select') 'Painel não separa atualizações por sistema operacional.'
     Assert-True ($dashboardSource -match 'compatibleSelectedIds') 'Painel não filtra os computadores compatíveis antes de criar a tarefa.'
     Assert-True ($dashboardSource -match 'auto_authorize_known_devices') 'Painel não possui controle de autorização automática para máquinas conhecidas.'
+    Assert-True ($dashboardSource -notmatch '\|\|\s*d\.public_ip') 'Painel não pode exibir o IP público no lugar do IP local da máquina.'
     $syncSource=Get-Content -LiteralPath (Join-Path $projectRoot 'supabase\functions\device-sync\index.ts') -Raw -Encoding UTF8
     Assert-True ($syncSource -match 'remote_updates_enabled') 'Servidor não respeita o bloqueio de atualizações remotas.'
     Assert-True ($syncSource -match 'platformFromOsType') 'Servidor não valida o sistema operacional do pacote.'
