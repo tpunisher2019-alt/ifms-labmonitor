@@ -40,6 +40,8 @@ test("separa inventário de atualizações e permite escolher computadores", asy
   assert.match(page, />Aplicar atualização</);
   assert.match(page, /id="download-release"[^>]*>Baixar versão</);
   assert.match(app, /adminFunction\("release_download"/);
+  assert.match(app, /remoteUpdateSupported = \(\) => state\.updatePlatform === "windows"/);
+  assert.match(app, /Linux: instalação manual/);
   assert.match(app, /job\.jobs\?\.type === "inventory_refresh"/);
   assert.match(app, /job\.jobs\?\.type === "agent_update"/);
 });

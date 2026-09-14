@@ -15,6 +15,7 @@ const platformFromOs = (value) => { const os = String(value || "").trim().toLowe
 const platformLabel = (value) => value === "windows" ? "Windows" : "Linux";
 const compatibleUpdateDevices = () => state.devices.filter((device) => platformFromOs(device.os_type) === state.updatePlatform);
 const compatibleSelectedIds = () => compatibleUpdateDevices().filter((device) => state.selected.has(device.id)).map((device) => device.id);
+const remoteUpdateSupported = () => state.updatePlatform === "windows";
 
 function message(text, error = false) { const el = $("app-message"); el.textContent = text; el.className = `message${error ? " error" : ""}`; el.hidden = !text; }
 function loginMessage(text) { const el = $("login-message"); el.textContent = text; el.hidden = !text; }
@@ -78,9 +79,11 @@ function render() {
   $("update-platform-select").value = state.updatePlatform;
   const platformReleases = state.releases.filter((release) => release.active && release.platform === state.updatePlatform);
   $("release-select").innerHTML = `<option value="">${platformReleases.length ? "Selecione uma versão" : `Nenhuma versão ${platformLabel(state.updatePlatform)} publicada`}</option>` + platformReleases.map((release) => `<option value="${esc(release.id)}">${platformLabel(release.platform)} • versão ${esc(release.version)}</option>`).join("");
-  $("remote-update-status").textContent = state.remoteUpdatesEnabled ? "Atualizações habilitadas" : "Atualizações desabilitadas";
-  $("remote-update-status").className = `badge ${state.remoteUpdatesEnabled ? "active" : "inactive"}`;
+  $("remote-update-status").textContent = remoteUpdateSupported() ? (state.remoteUpdatesEnabled ? "Atualizações habilitadas" : "Atualizações desabilitadas") : "Linux: instalação manual";
+  $("remote-update-status").className = `badge ${remoteUpdateSupported() && state.remoteUpdatesEnabled ? "active" : "inactive"}`;
+  $("toggle-remote-updates").hidden = !remoteUpdateSupported();
   $("toggle-remote-updates").textContent = state.remoteUpdatesEnabled ? "Desabilitar atualizações" : "Habilitar atualizações";
+  $("send-update").textContent = remoteUpdateSupported() ? "Aplicar atualização" : "Instalação manual";
   const updateDevices = compatibleUpdateDevices();
   $("update-device-rows").innerHTML = updateDevices.map((d) => `<tr><td><input class="device-check" type="checkbox" aria-label="Selecionar ${esc(d.hostname)} para atualização" data-device="${esc(d.id)}" ${state.selected.has(d.id) ? "checked" : ""}></td><td><b>${esc(d.hostname)}</b></td><td>${esc(d.os_type || platformLabel(state.updatePlatform))}</td><td>v${esc(d.agent_version)}</td><td><span class="status ${isOnline(d) ? "online" : ""}"><i></i>${isOnline(d) ? "Online" : "Offline"}</span></td><td>${ago(d.last_seen_at)}</td></tr>`).join("") || emptyRow(6, `Nenhum computador ${platformLabel(state.updatePlatform)} cadastrado.`);
   renderJobHistory();
@@ -153,7 +156,7 @@ async function decideRequests(status) {
 }
 
 function renderSoftware() { const query = $("software-search").value.trim().toLowerCase(); const device = $("software-device").value; const rows = state.software.filter((s) => (!device || s.device_id === device) && (!query || s.name.toLowerCase().includes(query) || (s.publisher || "").toLowerCase().includes(query))); $("software-rows").innerHTML = rows.map((s) => `<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.version)}</td><td>${esc(s.publisher)}</td><td>${esc(s.devices?.hostname)}</td><td>${esc(s.scope)}</td><td>${esc(s.architecture)}</td></tr>`).join("") || emptyRow(6, "Nenhum software encontrado."); }
-function updateActionButtons() { $("inventory-refresh").disabled = !state.selected.size; $("download-release").disabled = !$("release-select").value; $("send-update").disabled = !state.remoteUpdatesEnabled || !compatibleSelectedIds().length || !$("release-select").value; }
+function updateActionButtons() { $("inventory-refresh").disabled = !state.selected.size; $("download-release").disabled = !$("release-select").value; $("send-update").disabled = !remoteUpdateSupported() || !state.remoteUpdatesEnabled || !compatibleSelectedIds().length || !$("release-select").value; }
 function bindDeviceChecks() { document.querySelectorAll(".device-check").forEach((box) => box.addEventListener("change", () => { box.checked ? state.selected.add(box.dataset.device) : state.selected.delete(box.dataset.device); document.querySelectorAll(`.device-check[data-device="${CSS.escape(box.dataset.device)}"]`).forEach((peer) => { peer.checked = box.checked; }); updateActionButtons(); })); updateActionButtons(); }
 
 async function createJob(type, releaseId) {
