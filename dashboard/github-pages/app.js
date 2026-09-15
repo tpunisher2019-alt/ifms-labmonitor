@@ -45,14 +45,15 @@ async function loadData() {
   message("");
   const storageMetricsRequest = state.profile.role === "admin" ? adminFunction("metrics").then((result) => ({ data: result.metrics, error: null })).catch((error) => ({ data: null, error })) : Promise.resolve({ data: null, error: null });
   const results = await Promise.all([
-    supabase.from("devices").select("id,hostname,agent_version,status,last_seen_at,inventory_collected_at,os_type,os_version,primary_mac,local_ip_addresses").order("hostname"),
+    supabase.from("devices").select("id,hostname,agent_version,status,last_seen_at,inventory_collected_at,os_type,os_version,primary_mac,local_ip_addresses,active_mac,active_adapter_name").order("hostname"),
     supabase.from("device_events").select("event_id,occurred_at,event_type,user_name,payload,devices(hostname)").order("occurred_at", { ascending: false }).limit(100),
     supabase.from("software_inventory").select("device_id,inventory_key,name,version,publisher,scope,architecture,devices(hostname)").order("name").limit(5000),
     supabase.from("agent_releases").select("id,version,platform,active,created_at").order("created_at", { ascending: false }),
     supabase.from("device_jobs").select("job_id,status,leased_at,completed_at,result,devices(hostname,os_type),jobs(type,created_at)").order("leased_at", { ascending: false, nullsFirst: false }).limit(100),
     supabase.from("system_settings").select("event_retention_days,remote_updates_enabled,auto_authorize_known_devices").eq("id", true).maybeSingle(),
     supabase.from("device_enrollment_requests").select("id,hostname,mac_addresses,local_ip_addresses,request_ip,os_type,os_version,agent_version,status,last_requested_at,matched_device_id,match_score,match_reasons").order("last_requested_at", { ascending: false }).limit(200),
-    storageMetricsRequest
+    storageMetricsRequest,
+    state.profile.role === "admin" ? supabase.from("device_name_bindings").select("*") : Promise.resolve({ data: [], error: null })
   ]);
   const failed = results.slice(0, 7).find((item) => item.error);
   if (failed) { message("Não foi possível carregar os dados. Verifique a configuração do Supabase.", true); return; }
@@ -62,10 +63,13 @@ async function loadData() {
   state.autoAuthorizeKnownDevices = results[5].data?.auto_authorize_known_devices === true;
   state.requests = results[6].data || [];
   state.storageMetrics = results[7].data || null;
+  if (results[8].error) { message("Não foi possível carregar os vínculos de nomes.", true); return; }
+  state.nameBindings = results[8].data || [];
   render();
 }
 
 function render() {
+  renderMachineNames();
   const counts = new Map(); state.software.forEach((s) => counts.set(s.device_id, (counts.get(s.device_id) || 0) + 1));
   $("metric-devices").textContent = state.devices.length; $("metric-online").textContent = state.devices.filter(isOnline).length;
   $("metric-alerts").textContent = state.events.filter((e) => ["ProhibitedApplicationDetected", "SuspiciousApplicationDetected", "WallpaperChanged"].includes(e.event_type) && Date.now() - new Date(e.occurred_at) < 86400000).length;
@@ -168,6 +172,23 @@ async function createJob(type, releaseId) {
 }
 
 async function adminFunction(action, payload = {}) { const { data, error } = await supabase.functions.invoke(config.adminFunctionName || "admin-users", { body: { action, ...payload } }); if (error) throw error; return data; }
+function renderMachineNames() {
+  const labels = { pending: "Aguardando aplicação", reboot_pending: "Reinicialização pendente", succeeded: "Nome confirmado", failed: "Falhou — salve novamente para tentar", disabled: "Automação desabilitada" };
+  $("machine-name-rows").innerHTML = state.devices.filter((d) => platformFromOs(d.os_type) === "windows").map((d) => {
+    const binding = (state.nameBindings || []).find((b) => b.device_id === d.id);
+    return `<tr><td><b>${esc(d.hostname)}</b></td><td>${esc(d.active_adapter_name || "Não informado")}<small>${esc(d.active_mac || "Atualize o agente para informar o MAC ativo")}</small></td><td><input aria-label="Nome definido para ${esc(d.hostname)}" data-name-input="${esc(d.id)}" maxlength="15" value="${esc(binding?.desired_hostname || d.hostname)}" ${!d.active_mac ? "disabled" : ""}></td><td>${esc(binding ? labels[binding.status] || binding.status : "Sem vínculo")}<small>${esc(binding?.result_message || "")}</small></td><td><button class="button name-save" data-id="${esc(d.id)}" ${!d.active_mac ? "disabled" : ""}>Vincular / aplicar</button> <button class="button name-disable" data-id="${esc(d.id)}" ${!binding?.enabled ? "disabled" : ""}>Desabilitar</button></td></tr>`;
+  }).join("") || emptyRow(5, "Nenhum computador Windows cadastrado.");
+  document.querySelectorAll(".name-save,.name-disable").forEach((button) => button.addEventListener("click", async () => {
+    const device = state.devices.find((d) => d.id === button.dataset.id);
+    const binding = (state.nameBindings || []).find((b) => b.device_id === device.id);
+    const enabled = button.classList.contains("name-save");
+    const hostname = enabled ? document.querySelector(`[data-name-input="${CSS.escape(device.id)}"]`).value.trim().toUpperCase() : binding.desired_hostname;
+    if (!/^(?=.{1,15}$)(?![0-9]+$)[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?$/.test(hostname)) return message("Use de 1 a 15 letras, números ou hífens; sem espaços e não apenas números.", true);
+    if (enabled && !confirm(`Vincular ${device.active_mac} ao nome ${hostname}? Se o nome for diferente, o PC reiniciará após receber a configuração. O vínculo também será usado após reinstalação.`)) return;
+    button.disabled = true;
+    try { await adminFunction("save_device_name", { deviceId: device.id, mac: device.active_mac, hostname, enabled }); await loadData(); message(enabled ? "Nome vinculado. Aplicação na próxima sincronização do agente." : "Automação de nome desabilitada. Uma reinicialização já agendada não é cancelada."); } catch { message("Não foi possível salvar. Verifique se o MAC ainda é o ativo ou se o nome já está vinculado a outro PC.", true); } finally { button.disabled = false; }
+  }));
+}
 async function downloadRelease() { const releaseId = $("release-select").value; if (!releaseId) return; const button = $("download-release"); button.disabled = true; button.textContent = "Preparando..."; try { const result = await adminFunction("release_download", { releaseId }); if (!result?.downloadUrl) throw new Error("missing_download_url"); const link = document.createElement("a"); link.href = result.downloadUrl; link.download = result.fileName || "IFMS-LabMonitor.zip"; document.body.appendChild(link); link.click(); link.remove(); message("Download iniciado. O link temporário expira em 5 minutos."); } catch { message("Não foi possível preparar o download desta versão.", true); } finally { button.textContent = "Baixar versão"; updateActionButtons(); } }
 async function loadUsers() { try { const data = await adminFunction("list"); message(""); $("user-rows").innerHTML = (data.users || []).map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.email)}</td><td><span class="badge ${esc(u.role)}">${u.role === "admin" ? "Administrador" : "Monitor"}</span></td><td><span class="badge ${u.active ? "active" : "inactive"}">${u.active ? "Ativo" : "Inativo"}</span></td><td><div class="user-actions"><button class="button user-toggle" data-id="${esc(u.id)}" data-active="${!u.active}" ${u.id === state.profile.id ? "disabled" : ""}>${u.active ? "Desativar" : "Reativar"}</button><button class="button danger user-delete" data-id="${esc(u.id)}" data-name="${esc(u.full_name)}" ${u.id === state.profile.id ? "disabled" : ""}>Remover</button></div></td></tr>`).join("") || emptyRow(5, "Nenhum usuário cadastrado."); document.querySelectorAll(".user-toggle").forEach((button) => button.addEventListener("click", async () => { await adminFunction("update", { userId: button.dataset.id, active: button.dataset.active === "true" }); await loadUsers(); })); document.querySelectorAll(".user-delete").forEach((button) => button.addEventListener("click", async () => { if (!window.confirm(`Remover permanentemente o usuário ${button.dataset.name}?`)) return; try { await adminFunction("delete", { userId: button.dataset.id }); message("Usuário removido permanentemente."); await loadUsers(); } catch { message("Não foi possível remover o usuário. O último administrador não pode ser excluído.", true); } })); } catch { message("Não foi possível carregar os usuários.", true); } }
 

@@ -12,3 +12,4 @@ releases/
 config/network.json
 work/*
 *.log
+supabase/.temp/

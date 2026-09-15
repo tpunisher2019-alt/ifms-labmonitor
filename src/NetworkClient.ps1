@@ -27,7 +27,17 @@ function Get-LmDeviceRegistrationInfo {
     $baseBoard = Get-CimInstance Win32_BaseBoard -ErrorAction SilentlyContinue
     $activeConfigurations = @(Get-CimInstance Win32_NetworkAdapterConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPEnabled })
     $physicalAdapters = @(Get-CimInstance Win32_NetworkAdapter -ErrorAction SilentlyContinue | Where-Object { $_.PhysicalAdapter -eq $true -and $_.MACAddress })
-    $macs = @($physicalAdapters | ForEach-Object { [string]$_.MACAddress } | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
+    $netAdapters = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.MacAddress })
+    $physicalAdapters = @($physicalAdapters | Where-Object { $_.Name -notmatch 'VMware|VirtualBox|Hyper-V|TAP|Virtual' })
+    $macs = @($physicalAdapters | ForEach-Object { [string]$_.MACAddress } | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant().Replace('-', ':') } | Sort-Object -Unique)
+    if ($netAdapters.Count) { $macs = @($netAdapters | ForEach-Object { ([string]$_.MacAddress).ToUpperInvariant().Replace('-', ':') } | Sort-Object -Unique) }
+    $activeAdapter = $null
+    $routes = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object @{ Expression = { [int]$_.RouteMetric + [int]$_.InterfaceMetric } }, InterfaceIndex)
+    foreach ($route in $routes) {
+        $activeAdapter = $netAdapters | Where-Object { $_.ifIndex -eq $route.InterfaceIndex -and $_.Status -eq 'Up' } | Select-Object -First 1
+        if ($null -ne $activeAdapter) { break }
+    }
+    $activeMac = if ($null -ne $activeAdapter) { ([string]$activeAdapter.MacAddress).ToUpperInvariant().Replace('-', ':') } else { $null }
     if (-not $macs.Count) {
         $macs = @($activeConfigurations | ForEach-Object { [string]$_.MACAddress } | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() } | Sort-Object -Unique)
     }
@@ -54,6 +64,8 @@ function Get-LmDeviceRegistrationInfo {
         machineUuidHash = Get-LmSha256Text -Text $machineUuid
         hardwareFingerprint = $hardwareFingerprint
         macAddresses = $macs
+        activeMac = $activeMac
+        activeAdapterName = if ($activeAdapter) { [string]$activeAdapter.Name } else { $null }
         localIpAddresses = $ips
         osType = 'Windows'
         osVersion = if ($operatingSystem.Caption) { ('{0} {1}' -f $operatingSystem.Caption, $operatingSystem.Version).Trim() } else { [Environment]::OSVersion.VersionString }
@@ -105,6 +117,8 @@ function Initialize-LmDeviceIdentity {
         machineUuidHash = $registration.machineUuidHash
         hardwareFingerprint = $registration.hardwareFingerprint
         macAddresses = $registration.macAddresses
+        activeMac = $registration.activeMac
+        activeAdapterName = $registration.activeAdapterName
         localIpAddresses = $registration.localIpAddresses
         osType = $registration.osType
         osVersion = $registration.osVersion
@@ -166,6 +180,8 @@ function Invoke-LmNetworkSync {
         machineUuidHash = $registration.machineUuidHash
         hardwareFingerprint = $registration.hardwareFingerprint
         macAddresses = $registration.macAddresses
+        activeMac = $registration.activeMac
+        activeAdapterName = $registration.activeAdapterName
         localIpAddresses = $registration.localIpAddresses
         osType = $registration.osType
         osVersion = $registration.osVersion
@@ -173,7 +189,7 @@ function Invoke-LmNetworkSync {
         items = $items
         inventory = $inventory
     })
-    if ($response.reEnrollmentRequired -eq $true) {
+    if ($response.PSObject.Properties['reEnrollmentRequired'] -and $response.reEnrollmentRequired -eq $true) {
         if ($ReEnrollmentAttempted) { throw 'O computador precisa ser autorizado novamente no painel.' }
         $identityPath = Get-LmDeviceIdentityPath $RootPath
         if (Test-Path -LiteralPath $identityPath) { Remove-Item -LiteralPath $identityPath -Force }
@@ -184,5 +200,36 @@ function Invoke-LmNetworkSync {
         foreach ($file in $files) { Remove-Item -LiteralPath $file.FullName -Force }
         if ($null -ne $inventory -and (Test-Path -LiteralPath $pendingInventory)) { Remove-Item -LiteralPath $pendingInventory -Force }
     }
-    return [ordered]@{ identity = $identity; jobs = @($response.jobs); acceptedCount = $items.Count }
+    return [ordered]@{ identity = $identity; jobs = @($response.jobs); nameAssignment = if ($response.PSObject.Properties['nameAssignment']) { $response.nameAssignment } else { $null }; acceptedCount = $items.Count }
+}
+
+function Start-LmNameRestart {
+    & "$env:SystemRoot\System32\shutdown.exe" /r /t 60 /c 'IFMS LabMonitor: aplicando o nome da máquina definido pelo administrador. Salve seu trabalho.'
+    if ($LASTEXITCODE -ne 0) { throw 'Nome aplicado, mas não foi possível agendar a reinicialização.' }
+}
+
+function Invoke-LmNameAssignment {
+    param([string]$RootPath, $Assignment)
+    if ($null -eq $Assignment) { return }
+    $name = ([string]$Assignment.desired_hostname).ToUpperInvariant()
+    if ($name -notmatch '^(?=.{1,15}$)(?![0-9]+$)[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?$') { throw 'Nome remoto inválido.' }
+    $registration = Get-LmDeviceRegistrationInfo
+    if (-not $registration.activeMac -or $registration.activeMac -ne [string]$Assignment.mac) { return }
+    $boundMac = if ($Assignment.PSObject.Properties['bound_mac'] -and $Assignment.bound_mac) { [string]$Assignment.bound_mac } else { [string]$Assignment.mac }
+    if (@($registration.macAddresses) -notcontains $boundMac) { return }
+    $resultPath = Join-Path $RootPath 'data\state\name-assignment.json'
+    $previous = Read-LmJsonFile $resultPath
+    if ($env:COMPUTERNAME.ToUpperInvariant() -eq $name) { return }
+    # A failed revision is not retried endlessly. Administrator can save again.
+    if ($previous -and $previous.revision -eq $Assignment.revision) { return }
+    $result = [ordered]@{ revision = $Assignment.revision; mac = $boundMac; desiredHostname = $name; status = 'failed'; message = ''; timestampUtc = Get-LmUtcNow }
+    try {
+        $computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        if ($computerSystem.PartOfDomain) { throw 'Máquina no domínio: renomeação exige autorização do domínio; não foram armazenadas credenciais.' }
+        Rename-Computer -NewName $name -Force -ErrorAction Stop
+        $result.status = 'reboot_pending'; $result.message = 'Nome aplicado; reinicialização em 60 segundos.'
+        Write-LmAtomicJson -Path $resultPath -Value $result
+        Start-LmNameRestart
+    } catch { $result.status = 'failed'; $result.message = $_.Exception.Message; Write-LmAtomicJson -Path $resultPath -Value $result }
+    Add-LmOutboxItem -RootPath $RootPath -Kind 'name_result' -Payload $result
 }

@@ -90,7 +90,7 @@ O painel não envia comandos PowerShell arbitrários. Ele cria somente tarefas p
 Crie o pacote:
 
 ```powershell
-.\tools\New-AgentRelease.ps1 -Version 2.3.3
+.\tools\New-AgentRelease.ps1 -Version 2.3.4 -Legacy232Compatible
 ```
 
 Depois, envie o ZIP ao bucket privado `agent-releases` e cadastre versão, caminho e SHA-256 em `agent_releases`. O painel poderá direcionar essa versão para máquinas selecionadas.

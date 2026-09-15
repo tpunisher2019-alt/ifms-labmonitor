@@ -17,6 +17,24 @@ Deno.serve(async(request)=>{
   const [profile]=await profileResponse.json();
   if(!profile?.active||profile.role!=="admin")return reply({error:"admin_required"},403);
   const body=await request.json().catch(()=>({}));
+  if(body.action==="save_device_name"){
+    const deviceId=String(body.deviceId||""),mac=String(body.mac||"").toUpperCase(),name=String(body.hostname||"").trim().toUpperCase();
+    if(!/^[0-9a-f-]{36}$/i.test(deviceId)||!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)||!/^(?=.{1,15}$)(?![0-9]+$)[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?$/.test(name))return reply({error:"invalid_machine_name"},400);
+    const db=createClient(url,secret,{auth:{persistSession:false}});
+    const {data:device,error:lookupError}=await db.from("devices").select("id,hostname,active_mac,os_type,status").eq("id",deviceId).maybeSingle();
+    if(lookupError)return reply({error:"device_lookup_failed"},502);
+    if(!device||device.status==="disabled"||!String(device.os_type).toLowerCase().startsWith("win")||device.active_mac!==mac)return reply({error:"active_mac_required"},409);
+    const {data:existing,error:bindingError}=await db.from("device_name_bindings").select("device_id").eq("mac",mac).maybeSingle();
+    if(bindingError)return reply({error:"binding_lookup_failed"},502);
+    if(existing&&existing.device_id!==deviceId)return reply({error:"mac_already_bound"},409);
+    if(body.enabled!==false){
+      const {data:conflicting,error:conflictError}=await db.from("devices").select("id").ilike("hostname",name).neq("id",deviceId).limit(1);
+      if(conflictError)return reply({error:"name_lookup_failed"},502);
+      if(conflicting?.length)return reply({error:"hostname_in_use"},409);
+    }
+    const {error}=await db.from("device_name_bindings").upsert({mac,device_id:deviceId,desired_hostname:name,revision:crypto.randomUUID(),enabled:body.enabled!==false,status:body.enabled===false?"disabled":device.hostname.toUpperCase()===name?"succeeded":"pending",result_message:null,updated_by:caller.id,updated_at:new Date().toISOString()},{onConflict:"device_id"});
+    return reply({ok:!error,error:error?"name_save_failed":null},error?409:200);
+  }
   const cleanupReleases=async()=>{
     const releasesResponse=await fetch(`${url}/rest/v1/agent_releases?select=id,version,platform,storage_path&order=created_at.desc,id.desc`,{headers:baseHeaders});
     const releases=await releasesResponse.json().catch(()=>[]);

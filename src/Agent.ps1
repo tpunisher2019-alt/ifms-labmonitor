@@ -510,6 +510,7 @@ do {
                     $state.lastSyncAtUtc = Get-LmUtcNow
                     $script:syncRequested = $false
                     Process-RemoteJobs -Jobs $sync.jobs -NetworkConfig $networkConfig -AgentVersion $agentVersion
+                    if (-not $script:exitRequested) { Invoke-LmNameAssignment -RootPath $RootPath -Assignment $sync.nameAssignment }
                     if ($script:syncRequested -and -not $script:exitRequested) {
                         $null = Invoke-LmNetworkSync -RootPath $RootPath -NetworkConfig $networkConfig -AgentVersion $agentVersion -InventoryPath $paths.Inventory
                         $state.lastSyncAtUtc = Get-LmUtcNow

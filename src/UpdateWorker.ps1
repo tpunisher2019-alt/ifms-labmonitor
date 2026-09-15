@@ -28,6 +28,7 @@ function Write-UpdateResult {
 try {
     if ($ParentProcessId -gt 0) {
         Wait-Process -Id $ParentProcessId -Timeout 60 -ErrorAction SilentlyContinue
+        if (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue) { throw 'Agente anterior não encerrou; atualização não aplicada.' }
     }
     if ((Get-LmSha256File $PackagePath) -ne $ExpectedSha256.ToLowerInvariant()) { throw 'Hash SHA-256 do pacote não confere.' }
     New-LmDirectory $extractPath
@@ -36,7 +37,10 @@ try {
     if ($null -eq $manifest -or $manifest.schemaVersion -ne 1 -or [string]$manifest.version -ne $TargetVersion) {
         throw 'Manifesto do pacote ausente, inválido ou com versão diferente.'
     }
-    $allowedFiles = @('Agent.ps1','Common.ps1','ForegroundProvider.ps1','Inventory.ps1','NetworkClient.ps1','UpdateWorker.ps1','SessionWatcher.ps1')
+    $allowedFiles = @('Agent.ps1','Common.ps1','ForegroundProvider.ps1','Inventory.ps1','NetworkClient.ps1','UpdateWorker.ps1','SessionWatcher.ps1','WallpaperMonitor.ps1')
+    foreach ($required in @('Agent.ps1','Common.ps1','NetworkClient.ps1','UpdateWorker.ps1')) {
+        if (@($manifest.files | Where-Object { $_.path -eq $required }).Count -ne 1) { throw "Arquivo obrigatório ausente ou duplicado: $required" }
+    }
     $trustedThumbprints = @($TrustedSignerThumbprints | ForEach-Object { ([string]$_).Replace(' ', '').ToUpperInvariant() })
     foreach ($entry in @($manifest.files)) {
         if ($allowedFiles -notcontains [string]$entry.path) { throw "Arquivo não permitido no pacote: $($entry.path)" }
@@ -53,20 +57,22 @@ try {
         }
     }
     New-LmDirectory $backupPath
+    if (Test-Path (Join-Path $RootPath 'VERSION')) { Copy-Item -LiteralPath (Join-Path $RootPath 'VERSION') -Destination (Join-Path $backupPath 'VERSION') }
     Copy-Item -LiteralPath (Join-Path $RootPath 'src') -Destination (Join-Path $backupPath 'src') -Recurse -Force
     foreach ($entry in @($manifest.files)) {
         Copy-Item -LiteralPath (Join-Path $extractPath ('src\' + [string]$entry.path)) `
             -Destination (Join-Path $RootPath ('src\' + [string]$entry.path)) -Force
     }
     [IO.File]::WriteAllText((Join-Path $RootPath 'VERSION'), $TargetVersion + [Environment]::NewLine)
-    Write-UpdateResult 'succeeded' 'Atualização aplicada e agente reiniciado.'
-    Start-ScheduledTask -TaskName 'IFMS LabMonitor Agent' -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName 'IFMS LabMonitor Agent' -ErrorAction Stop
+    Write-UpdateResult 'succeeded' 'Atualização aplicada e inicialização do agente solicitada.'
 }
 catch {
     try {
         if (Test-Path -LiteralPath (Join-Path $backupPath 'src')) {
             Copy-Item -Path (Join-Path $backupPath 'src\*') -Destination (Join-Path $RootPath 'src') -Recurse -Force
         }
+        if (Test-Path (Join-Path $backupPath 'VERSION')) { Copy-Item -LiteralPath (Join-Path $backupPath 'VERSION') -Destination (Join-Path $RootPath 'VERSION') -Force }
     } catch { }
     Write-UpdateResult 'failed' $_.Exception.Message
     try { Start-ScheduledTask -TaskName 'IFMS LabMonitor Agent' -ErrorAction SilentlyContinue } catch { }

@@ -1,4 +1,15 @@
-IFMS LabMonitor - Agente para Windows 2.3.3
+IFMS LabMonitor - Agente para Windows 2.3.4
+
+NOME REMOTO: na página Computadores, o administrador pode vincular o MAC
+da rede física ativa ao nome desejado. Se diferente, o agente renomeia e
+agenda reinicialização em 60 segundos (salve o trabalho antes de aplicar).
+O vínculo também pode restaurar o nome após formatação do mesmo hardware.
+Máquinas novas continuam exigindo aprovação. IP não identifica um PC.
+Máquinas em domínio não são renomeadas por esta versão; use o procedimento
+do administrador do domínio. Nenhuma credencial de domínio é armazenada.
+Uma falha não é repetida indefinidamente: salve novamente para tentar.
+Desabilitar o vínculo não cancela uma reinicialização já agendada.
+Esta versão traz um pacote de transição para o atualizador 2.3.2/2.3.3.
 
 Este pacote solicita a conexão do computador ao painel do IFMS LabMonitor.
 

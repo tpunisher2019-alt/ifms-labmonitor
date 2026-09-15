@@ -1,0 +1,3 @@
+create unique index device_name_bindings_device_unique on public.device_name_bindings(device_id);
+drop index public.device_name_bindings_device_idx;
+create index device_name_bindings_updated_by_idx on public.device_name_bindings(updated_by);

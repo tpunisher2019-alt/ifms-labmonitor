@@ -124,7 +124,15 @@ Deno.serve(async (request) => {
         if (created.error || !created.data) return json({ error: "enrollment_request_failed" }, 409);
         enrollment = created.data;
       } else {
-        const refreshed = await db.from("device_enrollment_requests").update(metadata)
+        const match = await findMatchingDevice(db, metadata);
+        const identityChanged = enrollment.hardware_fingerprint !== metadata.hardware_fingerprint
+          || !intersects(metadata.mac_addresses, enrollment.mac_addresses);
+        if (identityChanged && enrollment.status === "claimed") return json({ error: "enrollment_identity_changed" }, 409);
+        const refreshed = await db.from("device_enrollment_requests").update({
+          ...metadata, matched_device_id: match?.id ?? null,
+          match_score: match?.score ?? 0, match_reasons: match?.reasons ?? [],
+          ...(identityChanged && enrollment.status === "approved" ? { status: "pending" } : {}),
+        })
           .eq("id", enrollment.id).eq("request_secret_hash", registrationHash).select("*").single();
         if (refreshed.error || !refreshed.data) return json({ error: "enrollment_request_failed" }, 409);
         enrollment = refreshed.data;
@@ -243,6 +251,8 @@ Deno.serve(async (request) => {
 
     const incomingFingerprint = String(body.hardwareFingerprint ?? "").trim().slice(0, 64);
     const incomingMacs = strings(body.macAddresses);
+    const activeMac = String(body.activeMac ?? "").toUpperCase().replaceAll("-", ":");
+    const validActiveMac = /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(activeMac) && intersects([activeMac], incomingMacs);
     const storedMacs = strings(device.mac_addresses);
     const fingerprintChanged = Boolean(device.hardware_fingerprint && incomingFingerprint)
       && device.hardware_fingerprint !== incomingFingerprint;
@@ -261,9 +271,18 @@ Deno.serve(async (request) => {
       mac_addresses: strings(body.macAddresses), local_ip_addresses: strings(body.localIpAddresses),
       public_ip: requestIp(request), updated_at: new Date().toISOString(), status: "online",
     };
+    if (validActiveMac) {
+      deviceUpdate.active_mac = activeMac;
+      deviceUpdate.active_adapter_name = String(body.activeAdapterName ?? "").slice(0, 128);
+      deviceUpdate.primary_mac = activeMac;
+    } else {
+      deviceUpdate.active_mac = null;
+      deviceUpdate.active_adapter_name = null;
+    }
     if (body.hardwareFingerprint) deviceUpdate.hardware_fingerprint = String(body.hardwareFingerprint).slice(0, 64);
     if (body.installationId) deviceUpdate.installation_id = String(body.installationId).slice(0, 128);
-    await db.from("devices").update(deviceUpdate).eq("id", deviceId);
+    const { error: heartbeatError } = await db.from("devices").update(deviceUpdate).eq("id", deviceId);
+    if (heartbeatError) return json({ error: "device_update_failed" }, 503);
 
     for (const item of Array.isArray(body.items) ? body.items : []) {
       if (item.kind === "event" && item.payload?.eventId) {
@@ -273,6 +292,11 @@ Deno.serve(async (request) => {
           event_type: e.type, session_key: e.sessionKey, session_id: e.sessionId,
           user_name: e.user, payload: e.data ?? {},
         }, { onConflict: "event_id", ignoreDuplicates: true });
+      } else if (item.kind === "name_result" && item.payload?.revision) {
+        await db.from("device_name_bindings").update({
+          status: item.payload.status === "reboot_pending" ? "reboot_pending" : "failed",
+          result_message: String(item.payload.message ?? "").slice(0, 1000),
+        }).eq("device_id", deviceId).eq("mac", item.payload.mac).eq("revision", item.payload.revision);
       } else if (item.kind === "job_result" && item.payload?.jobId) {
         await db.from("device_jobs").update({
           status: item.payload.status === "succeeded" ? "succeeded" : "failed",
@@ -318,6 +342,13 @@ Deno.serve(async (request) => {
         const { data: release } = await db.from("agent_releases").select("version,storage_path,sha256,active,platform")
           .eq("id", payload.releaseId).eq("active", true).maybeSingle();
         if (!release) continue;
+        const sourceVersion = String(body.agentVersion ?? "").replace(/^v/, "").split(".").map(Number);
+        const legacySource = sourceVersion.length !== 3 || sourceVersion.some((part) => !Number.isInteger(part))
+          || sourceVersion[0] < 2 || (sourceVersion[0] === 2 && (sourceVersion[1] < 3 || (sourceVersion[1] === 3 && sourceVersion[2] < 2)));
+        if (release.platform === "windows" && ((release.version === "2.3.4" && legacySource) || (release.version === "2.3.3" && String(body.agentVersion) === "2.3.2"))) {
+          await db.from("device_jobs").update({status:"failed",completed_at:new Date().toISOString(),result:{status:"failed",message:release.version === "2.3.3" ? "Use a versão 2.3.4: o pacote 2.3.3 não é compatível com o atualizador 2.3.2." : "Instale 2.3.4 manualmente: esta versão antiga não contém o monitor de papel de parede exigido pelo pacote de transição."}}).eq("job_id",job.id).eq("device_id",deviceId).eq("status","pending");
+          continue;
+        }
         if (platformFromOsType(device.os_type) !== release.platform) {
           await db.from("device_jobs").update({
             status: "failed",
@@ -334,7 +365,20 @@ Deno.serve(async (request) => {
         .eq("job_id", job.id).eq("device_id", deviceId).eq("status", "pending");
       jobs.push({ id: job.id, type: job.type, payload });
     }
-    return json({ accepted: true, jobs });
+    let nameAssignment = null;
+    if (validActiveMac && platformFromOsType(body.osType) === "windows") {
+      const { data: binding, error: bindingError } = await db.from("device_name_bindings")
+        .select("mac,desired_hostname,revision,status").eq("device_id", deviceId).eq("enabled", true).maybeSingle();
+      if (bindingError) return json({ error: "name_lookup_failed" }, 503);
+      // Switching Ethernet/Wi-Fi is safe only when the saved physical MAC is
+      // still present on this authenticated machine; IP alone never matches.
+      if (binding && intersects([binding.mac], incomingMacs)) {
+        if (binding.desired_hostname === String(body.hostname).toUpperCase()) {
+          if (binding.status !== "succeeded") await db.from("device_name_bindings").update({ status: "succeeded", result_message: "Nome confirmado pelo agente." }).eq("mac", binding.mac).eq("revision", binding.revision);
+        } else { nameAssignment = { ...binding, bound_mac: binding.mac, mac: activeMac }; }
+      }
+    }
+    return json({ accepted: true, reEnrollmentRequired: false, jobs, nameAssignment });
   } catch (error) {
     console.error(error);
     return json({ error: "internal_error" }, 500);

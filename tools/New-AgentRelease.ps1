@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'outputs'),
     [string]$NetworkConfigPath,
+    [switch]$Legacy232Compatible,
     [switch]$RequireAuthenticode,
     [string[]]$TrustedSignerThumbprints = @()
 )
@@ -29,7 +30,11 @@ try {
             }
         }
         Copy-Item -LiteralPath $source -Destination (Join-Path $stage ('src\' + $name))
-        $manifestFiles += [ordered]@{ path = $name; sha256 = Get-LmSha256File $source }
+        # 2.3.2 already installed WallpaperMonitor, but its updater whitelist
+        # cannot replace it. Keep it in the ZIP for fresh installs.
+        if (-not ($Legacy232Compatible -and $name -eq 'WallpaperMonitor.ps1')) {
+            $manifestFiles += [ordered]@{ path = $name; sha256 = Get-LmSha256File $source }
+        }
     }
     foreach ($name in @('install.ps1','install.bat','uninstall.ps1','uninstall.bat','VERSION')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination (Join-Path $stage $name)
