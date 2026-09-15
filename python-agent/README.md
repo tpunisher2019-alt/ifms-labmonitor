@@ -55,13 +55,15 @@ do ambiente instalado. Os dados locais não são apagados automaticamente.
 
 ```text
 su -
-apt-get install python3 python3-venv
 cd /caminho/do/pacote
-sh install-linux.sh
-systemctl enable --now labmonitor-python-preview
+sh install.sh
 ```
 
-O instalador não inicia o serviço automaticamente. Dados em
+O instalador instala Python/venv e certificados via apt-get, instala as
+dependências e habilita/inicia o serviço automaticamente. Requer internet,
+systemd e Python 3.11+ disponível nos repositórios (Debian 12+ ou Ubuntu 24.04+).
+Não exige sudo nem alterações no GNOME. Mantém o envio ao site DESABILITADO
+e não altera o agente antigo. Dados em
 /opt/ifms-labmonitor-python-preview/data, acessíveis somente por root.
 
 ## Teste conectado — escolha explícita

@@ -1,2 +1,3 @@
 python-agent/install-linux.sh text eol=lf
+python-agent/install.sh text eol=lf
 python-agent/labmonitor-python-preview.service text eol=lf
