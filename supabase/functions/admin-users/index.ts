@@ -17,6 +17,13 @@ Deno.serve(async(request)=>{
   const [profile]=await profileResponse.json();
   if(!profile?.active||profile.role!=="admin")return reply({error:"admin_required"},403);
   const body=await request.json().catch(()=>({}));
+  if(body.action==="disable_device_name"){
+    const deviceId=String(body.deviceId||"");
+    if(!/^[0-9a-f-]{36}$/i.test(deviceId))return reply({error:"invalid_device"},400);
+    const db=createClient(url,secret,{auth:{persistSession:false}});
+    const {error}=await db.from("device_name_bindings").update({enabled:false,status:"disabled",revision:crypto.randomUUID(),updated_by:caller.id,updated_at:new Date().toISOString()}).eq("device_id",deviceId);
+    return reply({ok:!error},error?502:200);
+  }
   if(body.action==="save_device_name"){
     const deviceId=String(body.deviceId||""),mac=String(body.mac||"").toUpperCase(),name=String(body.hostname||"").trim().toUpperCase();
     if(!/^[0-9a-f-]{36}$/i.test(deviceId)||!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)||!/^(?=.{1,15}$)(?![0-9]+$)[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?$/.test(name))return reply({error:"invalid_machine_name"},400);
