@@ -40,9 +40,12 @@ O diagnóstico só consulta a máquina: não envia informações ao Supabase.
 
 ## Serviço Windows de teste
 
-Instale Python para TODOS os usuários. Extraia o ZIP e execute
-install-windows.bat como administrador. Instalador cria o serviço, mas NÃO
-o inicia. Arquivos ficam em C:\ProgramData\IFMS\LabMonitorPythonPreview,
+Extraia o ZIP e dê dois cliques em install.bat. Confirme a permissão de
+administrador do Windows. O instalador reutiliza Python compatível instalado
+para todos os usuários, ou baixa Python 3.14.6 oficial e verifica sua assinatura.
+Requer internet para baixar Python/dependências. Cria e inicia o serviço,
+mas mantém o envio ao site DESABILITADO. Não para ou altera o agente antigo.
+Uma instalação existente não será sobrescrita. Arquivos ficam em C:\ProgramData\IFMS\LabMonitorPythonPreview,
 com acesso restrito a administradores e SYSTEM.
 Inicie IFMSLabMonitorPythonPreview pela ferramenta Serviços quando estiver
 pronto. Para parar/remover o serviço, use service.py stop/remove com o Python
