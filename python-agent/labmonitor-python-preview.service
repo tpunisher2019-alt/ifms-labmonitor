@@ -1,0 +1,17 @@
+[Unit]
+Description=IFMS LabMonitor Python Preview
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ifms-labmonitor-python-preview
+ExecStart=/opt/ifms-labmonitor-python-preview/.venv/bin/python agent.py
+Restart=on-failure
+RestartSec=60
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -13,3 +13,6 @@ config/network.json
 work/*
 *.log
 supabase/.temp/
+**/.venv/
+**/__pycache__/
+python-agent/data/
